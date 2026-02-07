@@ -4,7 +4,6 @@
 #include "inf_image.h"
 
 struct Game {
-    // Render Data
     ConstantBuffer gameConstantBuffer;
     ConstantBuffer frameConstantBuffer;
     void* textureSampler;
@@ -15,6 +14,8 @@ struct Game {
     PipelineState meshPipeline;
     PipelineState wireframeMeshPipeline;
     Texture texture;
+    
+    int instancesToDraw;
     
     MemoryArena memArena;
 };
@@ -94,7 +95,7 @@ SvoImport LoadSvo(const char* filePath, AllocFunc alloc) {
     return svo;
 }
 
-struct SvoCoord {
+struct Vector3Int {
     int x, y, z;
 };
 
@@ -134,25 +135,6 @@ void InitGame() {
     
     SvoImport svo = LoadSvo("data/svo/xyzrgb_statuette_8k.rsvo", ArenaAlloc);
 
-    int coordCount = 0;
-    SvoCoord coords[4];
-    
-    int count = svo.nodesAtLevel[0];
-    for (int i = 0; i < count; i++) {
-        u8 mask = svo.masksAtLevel[0][i];
-        
-        for (int child = 0; child < 8; child++) {
-            if (mask & (1u << child)) {
-                int xBit = child & 1; 
-                int yBit = (child >> 1) & 1; 
-                int zBit = (child >> 2) & 1;
-                
-                coords[coordCount] = { xBit, yBit, zBit };
-                coordCount += 1;
-            }
-        }
-    }
-    
     Vertex_XYZ cubeVertices[] = {
         {0, 0, 0},
         {0, 1, 0},
@@ -176,28 +158,60 @@ void InitGame() {
                               4, 5, 5, 6, 6, 7, 7, 4 };
     
     // TODO(roger): Use StaticDraw instead.
-    InitializeGpuBuffer(&game.vertexBuffer, countOf(cubeVertices) * 8, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
+    InitializeGpuBuffer(&game.vertexBuffer, countOf(cubeVertices) * 64000, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
     InitializeIndexBuffer(&game.indexBuffer, countOf(cubeLineIndices) + countOf(cubeTriIndices), IndexFormat_U32, DynamicDraw);
     
     // TODO(roger): in Cultist, see if there is a function for appending data to a buffer (and resizing buffer when capacity is reached). should be something.
     MapBuffer(&game.vertexBuffer, true);
+    
+        Vector3Int** coordsAtLevel = ALLOC_ARRAY(TempAllocator, Vector3Int*, svo.topLevel + 1);
+        coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
+        coordsAtLevel[0][0] = { 0, 0, 0 };
+
         for (int i = 0; i < 8; i++) {
-            size_t size = countOf(cubeVertices) * sizeof(Vertex_XYZ);
-            Vertex_XYZ* offset = (Vertex_XYZ*)((u8*)game.vertexBuffer.mapped + (i * size)); 
-            memcpy(offset, cubeVertices, size);
+            int parentCount = svo.nodesAtLevel[i]; 
+            int childCount  = svo.nodesAtLevel[i + 1];
+            coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
             
-            int xBit = i & 1; 
-            int yBit = (i >> 1) & 1; 
-            int zBit = (i >> 2) & 1;
+            u32 w = 0;
+            
+            for (int p = 0; p < parentCount; p++) {
+                Vector3Int pc = coordsAtLevel[i][p];
+                u8 parentMask = svo.masksAtLevel[i][p];
+                
+                for (int child = 0; child < 8; child++) {
+                    if (parentMask & (1u << child)) {
+                        int xb = child & 1;
+                        int yb = (child >> 1) & 1;
+                        int zb = (child >> 2) & 1;
+                        
+                        coordsAtLevel[i + 1][w++] = { pc.x * 2 + xb, 
+                                                      pc.y * 2 + yb, 
+                                                      pc.z * 2 + zb };
+                    }
+                }    
+            }
+        }
+        
+        float rootSize = 8.0f;
+        int lvl = 7;
+        float voxelSize = rootSize / (1 << (lvl + 1));
+        
+        for (int i = 0; i < svo.nodesAtLevel[lvl]; ++i) {
+            Vector3Int c = coordsAtLevel[lvl][i];
+            
+            size_t memSize = countOf(cubeVertices) * sizeof(Vertex_XYZ);
+            Vertex_XYZ* offset = (Vertex_XYZ*)((u8*)game.vertexBuffer.mapped + (game.instancesToDraw * memSize)); 
             
             for (int j = 0; j < countOf(cubeVertices); j++) {
-                offset[j].x += xBit;
-                offset[j].y += yBit;
-                offset[j].z += zBit;
+                offset[j].x = (cubeVertices[j].x + c.x) * voxelSize;
+                offset[j].y = (cubeVertices[j].y + c.y) * voxelSize;
+                offset[j].z = (cubeVertices[j].z + c.z) * voxelSize;
             }
-            
             game.vertexBuffer.count += countOf(cubeVertices);
+            game.instancesToDraw += 1;
         }
+        
     UnmapBuffer(&game.vertexBuffer);
     
     MapBuffer(&game.indexBuffer, true);
@@ -241,14 +255,14 @@ void TickGame() {
         SetPipelineState(&game.wireframeMeshPipeline);
         BindVertexBuffers(vertexBuffers, 1);
         BindIndexBuffer(&game.indexBuffer);
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < game.instancesToDraw; i++) {
             // TODO(roger): Hardcoded index count.
             DrawIndexedVertices(24, 0, i * 8);
         }
         
-        SetPipelineState(&game.meshPipeline);
+        // SetPipelineState(&game.meshPipeline);
         // TODO(roger): Hardcoded count and start.
-        DrawIndexedVertices(36, 24, 0);
+        // DrawIndexedVertices(36, 24, 0);
 
     EndDrawing();
     
