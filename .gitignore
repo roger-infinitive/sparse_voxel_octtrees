@@ -1,0 +1,12 @@
+*.suo
+*.o
+*.obj
+*.ilk
+*.sln
+*.pak
+*.raddbgi
+*.rdi
+*.pdb
+*.exe
+*.cso
+*.xvd

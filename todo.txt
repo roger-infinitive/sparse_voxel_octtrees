@@ -1,0 +1,2 @@
+- load a rsvo file
+- populate SVO with voxel data and render
