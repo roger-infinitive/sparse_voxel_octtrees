@@ -9,6 +9,7 @@ struct Game {
     void* textureSampler;
     ShaderProgram simpleUvShader;
     ShaderProgram simpleShader;
+    ShaderProgram simpleLightShader;
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;
     PipelineState meshPipeline;
@@ -116,6 +117,7 @@ void InitGame() {
 
     game.simpleUvShader = LoadShader("data/shaders/dx11/simple_uv.fxh", VertexLayout_XY_UV_RGBA);
     game.simpleShader = LoadShader("data/shaders/dx11/simple_line.fxh", VertexLayout_XYZ);
+    game.simpleLightShader = LoadShader("data/shaders/dx11/simple_light.fxh", VertexLayout_XYZ_NORMAL);
 
     game.wireframeMeshPipeline.topology = PrimitiveTopology_LineList;
     game.wireframeMeshPipeline.vertexLayout = VertexLayout_XYZ;
@@ -126,40 +128,18 @@ void InitGame() {
     CreatePipelineState(&game.wireframeMeshPipeline);
     
     game.meshPipeline.topology = PrimitiveTopology_TriangleList;
-    game.meshPipeline.vertexLayout = VertexLayout_XYZ;
+    game.meshPipeline.vertexLayout = VertexLayout_XYZ_NORMAL;
     game.meshPipeline.rasterizer = Rasterizer_Default;
-    game.meshPipeline.shader = &game.simpleShader;
-    BlendModeOverwrite(&game.meshPipeline.blendDesc);
+    game.meshPipeline.shader = &game.simpleLightShader;
+    game.meshPipeline.blendDesc.enableBlend = false;
     game.meshPipeline.stencilMode = StencilMode_None;
     CreatePipelineState(&game.meshPipeline);
     
     SvoImport svo = LoadSvo("data/svo/xyzrgb_statuette_8k.rsvo", ArenaAlloc);
-
-    Vertex_XYZ cubeVertices[] = {
-        {0, 0, 0},
-        {0, 1, 0},
-        {1, 1, 0},
-        {1, 0, 0},
-        {0, 0, 1},
-        {0, 1, 1},
-        {1, 1, 1},
-        {1, 0, 1},
-    };
-    
-    u32 cubeTriIndices[] = { 0, 1, 2, 2, 3, 0,
-                             5, 1, 0, 0, 4, 5,
-                             4, 7, 6, 6, 5, 4, 
-                             2, 6, 7, 7, 3, 2,
-                             5, 6, 2, 2, 1, 5,
-                             4, 7, 3, 3, 0, 4 };
-    
-    u32 cubeLineIndices[] = { 0, 1, 1, 2, 2, 3, 3, 0, 
-                              0, 4, 1, 5, 2, 6, 3, 7,
-                              4, 5, 5, 6, 6, 7, 7, 4 };
     
     // TODO(roger): Use StaticDraw instead.
-    InitializeGpuBuffer(&game.vertexBuffer, countOf(cubeVertices) * 64000, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
-    InitializeIndexBuffer(&game.indexBuffer, countOf(cubeLineIndices) + countOf(cubeTriIndices), IndexFormat_U32, DynamicDraw);
+    InitializeGpuBuffer(&game.vertexBuffer, countOf(CubeVertices_XYZ_N) * 640000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
+    InitializeIndexBuffer(&game.indexBuffer, countOf(CubeTriIndices_XYZ_N), IndexFormat_U32, DynamicDraw);
     
     // TODO(roger): in Cultist, see if there is a function for appending data to a buffer (and resizing buffer when capacity is reached). should be something.
     MapBuffer(&game.vertexBuffer, true);
@@ -168,7 +148,7 @@ void InitGame() {
         coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
         coordsAtLevel[0][0] = { 0, 0, 0 };
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 10; i++) {
             int parentCount = svo.nodesAtLevel[i]; 
             int childCount  = svo.nodesAtLevel[i + 1];
             coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
@@ -194,33 +174,30 @@ void InitGame() {
         }
         
         float rootSize = 8.0f;
-        int lvl = 7;
+        int lvl = 9;
         float voxelSize = rootSize / (1 << (lvl + 1));
         
         for (int i = 0; i < svo.nodesAtLevel[lvl]; ++i) {
             Vector3Int c = coordsAtLevel[lvl][i];
             
-            size_t memSize = countOf(cubeVertices) * sizeof(Vertex_XYZ);
-            Vertex_XYZ* offset = (Vertex_XYZ*)((u8*)game.vertexBuffer.mapped + (game.instancesToDraw * memSize)); 
+            size_t memSize = countOf(CubeVertices_XYZ_N) * sizeof(Vertex_XYZ_N);
+            Vertex_XYZ_N* offset = (Vertex_XYZ_N*)((u8*)game.vertexBuffer.mapped + (game.instancesToDraw * memSize)); 
+            memcpy(offset, CubeVertices_XYZ_N, memSize);
             
-            for (int j = 0; j < countOf(cubeVertices); j++) {
-                offset[j].x = (cubeVertices[j].x + c.x) * voxelSize;
-                offset[j].y = (cubeVertices[j].y + c.y) * voxelSize;
-                offset[j].z = (cubeVertices[j].z + c.z) * voxelSize;
+            for (int j = 0; j < countOf(CubeVertices_XYZ_N); j++) {
+                offset[j].x = (CubeVertices_XYZ_N[j].x + c.x) * voxelSize;
+                offset[j].y = (CubeVertices_XYZ_N[j].y + c.y) * voxelSize;
+                offset[j].z = (CubeVertices_XYZ_N[j].z + c.z) * voxelSize;
             }
-            game.vertexBuffer.count += countOf(cubeVertices);
+            game.vertexBuffer.count += countOf(CubeVertices_XYZ_N);
             game.instancesToDraw += 1;
         }
         
     UnmapBuffer(&game.vertexBuffer);
     
     MapBuffer(&game.indexBuffer, true);
-        memcpy(game.indexBuffer.mapped, cubeLineIndices, countOf(cubeLineIndices) * sizeof(u32));
-        game.indexBuffer.count += countOf(cubeLineIndices);
-        
-        void* offset = (u8*)game.indexBuffer.mapped + countOf(cubeLineIndices) * sizeof(u32); 
-        memcpy(offset, cubeTriIndices, countOf(cubeTriIndices) * sizeof(u32));
-        game.indexBuffer.count += countOf(cubeTriIndices);
+        memcpy(game.indexBuffer.mapped, CubeTriIndices_XYZ_N, countOf(CubeTriIndices_XYZ_N) * sizeof(u32));
+        game.indexBuffer.count += countOf(CubeTriIndices_XYZ_N);
     UnmapBuffer(&game.indexBuffer);
 }
 
@@ -230,11 +207,17 @@ void TickGame() {
     float deltaTime = 1.0f / 60.0f;
     
     // TODO(roger): From Camera.
-    local_persist Vector3 eyePosition = { 0, 2, -3 };
-    eyePosition = RotateY(eyePosition, pi/8 * deltaTime);  
+    local_persist float rot = 0;
+    rot += pi/8.0f * deltaTime;
     
-    Vector3 forward = eyePosition * -1;
+    Vector3 center = {1, 0,  1};
+    Vector3 offset = {0, 2, -4};
+    offset = RotateY(offset, rot);
+    
+    Vector3 eyePosition = center + offset;
+    Vector3 forward = center - eyePosition;
     forward.y = 0;
+    forward = Normalize(forward);
     Vector3 up = {0, 1, 0};
 
     Matrix4 view = LookToLH(eyePosition, forward, up);
@@ -257,13 +240,8 @@ void TickGame() {
         BindVertexBuffers(vertexBuffers, 1);
         BindIndexBuffer(&game.indexBuffer);
         for (int i = 0; i < game.instancesToDraw; i++) {
-            // TODO(roger): Hardcoded index count.
-            DrawIndexedVertices(36, 24, i * 8);
+            DrawIndexedVertices(countOf(CubeTriIndices_XYZ_N), 0, i * countOf(CubeVertices_XYZ_N));
         }
-        
-        // SetPipelineState(&game.meshPipeline);
-        // TODO(roger): Hardcoded count and start.
-        // DrawIndexedVertices(36, 24, 0);
 
     EndDrawing();
     

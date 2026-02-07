@@ -9,6 +9,11 @@ struct Vertex_XYZ {
     float x, y, z;
 };
 
+struct Vertex_XYZ_N {
+    float x, y, z;
+    float nx, ny, nz;
+};
+
 struct VertexUV {
     float x, y, z;
     float u, v;
@@ -76,6 +81,69 @@ VertexUV2Color VertexUV2Color_Quad[] = {
 u16 DefaultIndices[] = {
 	0, 1, 2, 2, 3, 0
 };
+
+Vertex_XYZ_N CubeVertices_XYZ_N[] = {
+    {0, 0, 0, 0, 0, -1},
+    {0, 1, 0, 0, 0, -1},
+    {1, 1, 0, 0, 0, -1},
+    {1, 0, 0, 0, 0, -1},
+
+    {0, 0, 0, -1, 0, 0},
+    {0, 1, 0, -1, 0, 0},
+    {0, 1, 1, -1, 0, 0},
+    {0, 0, 1, -1, 0, 0},
+    
+    {0, 0, 0, 0, -1, 0},
+    {0, 0, 1, 0, -1, 0},
+    {1, 0, 1, 0, -1, 0},
+    {1, 0, 0, 0, -1, 0},
+    
+    {0, 0, 1, 0, 0, 1},
+    {0, 1, 1, 0, 0, 1},
+    {1, 1, 1, 0, 0, 1},
+    {1, 0, 1, 0, 0, 1},
+
+    {1, 0, 0, 1, 0, 0},
+    {1, 1, 0, 1, 0, 0},
+    {1, 1, 1, 1, 0, 0},
+    {1, 0, 1, 1, 0, 0},
+    
+    {0, 1, 0, 0, 1, 0},
+    {0, 1, 1, 0, 1, 0},
+    {1, 1, 1, 0, 1, 0},
+    {1, 1, 0, 0, 1, 0},
+};
+
+u32 CubeTriIndices_XYZ_N[] = {  0,  1,  2,  2,  3,  0,
+                                6,  5,  4,  4,  7,  6,
+                                8,  11, 10, 10, 9,  8,
+                               12, 15, 14, 14, 13, 12,
+                               16, 17, 18, 18, 19, 16,
+                               20, 21, 22, 22, 23, 20, };
+
+Vertex_XYZ CubeVertices_XYZ[] = {
+    {0, 0, 0},
+    {0, 1, 0},
+    {1, 1, 0},
+    {1, 0, 0},
+    {0, 0, 1},
+    {0, 1, 1},
+    {1, 1, 1},
+    {1, 0, 1},
+};
+
+// for CubeVertices_XYZ
+u32 CubeLineIndices_XYZ[] = { 0, 1, 1, 2, 2, 3, 3, 0, 
+                             0, 4, 1, 5, 2, 6, 3, 7,
+                             4, 5, 5, 6, 6, 7, 7, 4 };
+       
+// for CubeVertices_XYZ
+u32 CubeTriIndices_XYZ[] = { 0, 1, 2, 2, 3, 0,
+                            5, 1, 0, 0, 4, 5,
+                            4, 7, 6, 6, 5, 4, 
+                            2, 6, 7, 7, 3, 2,
+                            5, 6, 2, 2, 1, 5,
+                            4, 7, 3, 3, 0, 4 };
 
 IndexedMesh GenerateGridMesh(int rows, int cols, void* (*mem_alloc)(size_t), int subdivisionCount = 4) {
     IndexedMesh mesh = {0};

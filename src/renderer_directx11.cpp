@@ -77,17 +77,24 @@ void DX11_SetViewport(int width, int height) {
 
 void DX11_InitializeStencilModes() {
 	D3D11_DEPTH_STENCIL_DESC noneStencilDesc = {0};
+	noneStencilDesc.DepthEnable = TRUE;
+    noneStencilDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    noneStencilDesc.DepthFunc = D3D11_COMPARISON_LESS;
 	HRESULT result = device->CreateDepthStencilState(&noneStencilDesc, (ID3D11DepthStencilState**)&stencilModes[StencilMode_None]);
 	ASSERT_ERROR(result == 0, "(DX11) Failed to create stencil state (none).\n");
 
-	D3D11_DEPTH_STENCIL_DESC writeDesc = {0};
-	writeDesc.StencilEnable = true;
-	writeDesc.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
-	writeDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
-	writeDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_REPLACE;
-	writeDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
-	writeDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
-	writeDesc.BackFace = writeDesc.FrontFace;
+    D3D11_DEPTH_STENCIL_DESC writeDesc = {};
+    writeDesc.DepthEnable = TRUE;
+    writeDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    writeDesc.DepthFunc = D3D11_COMPARISON_LESS;
+    writeDesc.StencilEnable = TRUE;
+    writeDesc.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK;
+    writeDesc.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
+    writeDesc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+    writeDesc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_REPLACE;
+    writeDesc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    writeDesc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+    writeDesc.BackFace = writeDesc.FrontFace;
 	result = device->CreateDepthStencilState(&writeDesc, (ID3D11DepthStencilState**)&stencilModes[StencilMode_Write]);
 	ASSERT_ERROR(result == 0, "(DX11) Failed to create stencil state (write mask).\n");
 
@@ -337,11 +344,18 @@ ShaderProgram DX11_LoadShader(const char* path, VertexLayoutType vertexLayoutTyp
                 layout[count++] = { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 };
             } break;
             
+            case VertexLayout_XYZ_NORMAL: {
+                layout[count++] = { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0,  D3D11_INPUT_PER_VERTEX_DATA, 0 };
+                layout[count++] = { "NORMAL",   0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  12, D3D11_INPUT_PER_VERTEX_DATA, 0 };
+            } break;
+            
             case VertexLayout_XYZ_UV_RGBA: {
                 layout[count++] = { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0,  0, D3D11_INPUT_PER_VERTEX_DATA, 0 };
                 layout[count++] = { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 };
                 layout[count++] = { "TINT",     0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 };
             } break;
+            
+            default: NOT_IMPLEMENTED();
         }
 
         result = device->CreateInputLayout(layout, count,
@@ -444,7 +458,7 @@ void DX11_SetTextureSamplers(u32 startSlot, void** samplers, u32 count) {
 
 void DX11_BeginDrawing() {
     imContext->OMSetRenderTargets(1, &swapchainRTV, depthStencilView);
-    imContext->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_STENCIL, 1.0f, 0);
+    imContext->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
     activeRenderTarget = swapchainRTV;
 }
 
@@ -463,7 +477,7 @@ void DX11_DrawIndexedVertices(u32 indexCount, u32 startIndex, int baseVertex) {
 void DX11_BeginTextureMode(Texture* renderTexture) {
     activeRenderTarget = renderTexture->dx11.rtv;
     imContext->OMSetRenderTargets(1, &activeRenderTarget, depthStencilView);
-    imContext->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_STENCIL, 1.0f, 0);
+    imContext->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
 }
 
 void DX11_EndTextureMode() {
@@ -769,7 +783,7 @@ void DX11_InitializeRenderer(HWND window) {
     //Create solid rasterizer
     D3D11_RASTERIZER_DESC rasterDesc = { };
     rasterDesc.AntialiasedLineEnable = false;
-    rasterDesc.CullMode = D3D11_CULL_NONE;
+    rasterDesc.CullMode = D3D11_CULL_BACK;
     rasterDesc.DepthBias = 0;
     rasterDesc.DepthBiasClamp = 0.0f;
     rasterDesc.DepthClipEnable = true;

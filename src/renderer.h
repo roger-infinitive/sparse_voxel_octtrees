@@ -126,6 +126,7 @@ enum VertexLayoutType {
     VertexLayout_XY_UV_RGBA,
     VertexLayout_XYZ,
     VertexLayout_XYZ_UV_RGBA,
+    VertexLayout_XYZ_NORMAL,
     VertexLayout_Count
 };
 
