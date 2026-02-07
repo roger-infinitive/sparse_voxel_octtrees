@@ -21,7 +21,7 @@ Vector2 GetClientSize();
 
 bool rendererInitialized;
 LPCSTR windowName = "SVO"; 
-LPCSTR windowClassName = "NoSpaceWindow"; 
+LPCSTR windowClassName = "SVOWindow"; 
 HWND window;
 WINDOWPLACEMENT previousWindowPlacement = { sizeof(previousWindowPlacement) };
 

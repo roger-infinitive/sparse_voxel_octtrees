@@ -9,9 +9,10 @@ struct Game {
     ConstantBuffer frameConstantBuffer;
     void* textureSampler;
     ShaderProgram simpleUvShader;
-    ShaderProgram simpleLineShader;
+    ShaderProgram simpleShader;
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;
+    PipelineState meshPipeline;
     PipelineState wireframeMeshPipeline;
     Texture texture;
     
@@ -113,15 +114,23 @@ void InitGame() {
     UpdateConstantBuffer(&game.gameConstantBuffer, &projection, sizeof(Matrix4));
 
     game.simpleUvShader = LoadShader("data/shaders/dx11/simple_uv.fxh", VertexLayout_XY_UV_RGBA);
-    game.simpleLineShader = LoadShader("data/shaders/dx11/simple_line.fxh", VertexLayout_XYZ);
+    game.simpleShader = LoadShader("data/shaders/dx11/simple_line.fxh", VertexLayout_XYZ);
 
     game.wireframeMeshPipeline.topology = PrimitiveTopology_LineList;
     game.wireframeMeshPipeline.vertexLayout = VertexLayout_XYZ;
     game.wireframeMeshPipeline.rasterizer = Rasterizer_Wireframe;
-    game.wireframeMeshPipeline.shader = &game.simpleLineShader;
-    BlendModePremultipliedAlpha(&game.wireframeMeshPipeline.blendDesc);
+    game.wireframeMeshPipeline.shader = &game.simpleShader;
+    BlendModeOverwrite(&game.wireframeMeshPipeline.blendDesc);
     game.wireframeMeshPipeline.stencilMode = StencilMode_None;
     CreatePipelineState(&game.wireframeMeshPipeline);
+    
+    game.meshPipeline.topology = PrimitiveTopology_TriangleList;
+    game.meshPipeline.vertexLayout = VertexLayout_XYZ;
+    game.meshPipeline.rasterizer = Rasterizer_Default;
+    game.meshPipeline.shader = &game.simpleShader;
+    BlendModeOverwrite(&game.meshPipeline.blendDesc);
+    game.meshPipeline.stencilMode = StencilMode_None;
+    CreatePipelineState(&game.meshPipeline);
     
     SvoImport svo = LoadSvo("data/svo/xyzrgb_statuette_8k.rsvo", ArenaAlloc);
 
@@ -144,7 +153,7 @@ void InitGame() {
         }
     }
     
-    Vertex_XYZ lineVertices[] = {
+    Vertex_XYZ cubeVertices[] = {
         {0, 0, 0},
         {0, 1, 0},
         {1, 1, 0},
@@ -155,22 +164,49 @@ void InitGame() {
         {1, 0, 1},
     };
     
-    u32 lineIndices[] = { 0, 1, 1, 2, 2, 3, 3, 0, 
-                          0, 4, 1, 5, 2, 6, 3, 7,
-                          4, 5, 5, 6, 6, 7, 7, 4 };
+    u32 cubeTriIndices[] = { 0, 1, 2, 2, 3, 0,
+                             5, 1, 0, 0, 4, 5,
+                             4, 7, 6, 6, 5, 4, 
+                             2, 6, 7, 7, 3, 2,
+                             5, 6, 2, 2, 1, 5,
+                             4, 7, 3, 3, 0, 4 };
+    
+    u32 cubeLineIndices[] = { 0, 1, 1, 2, 2, 3, 3, 0, 
+                              0, 4, 1, 5, 2, 6, 3, 7,
+                              4, 5, 5, 6, 6, 7, 7, 4 };
     
     // TODO(roger): Use StaticDraw instead.
-    InitializeGpuBuffer(&game.vertexBuffer, countOf(lineVertices), sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
-    InitializeIndexBuffer(&game.indexBuffer, countOf(lineIndices), IndexFormat_U32, DynamicDraw);
+    InitializeGpuBuffer(&game.vertexBuffer, countOf(cubeVertices) * 8, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
+    InitializeIndexBuffer(&game.indexBuffer, countOf(cubeLineIndices) + countOf(cubeTriIndices), IndexFormat_U32, DynamicDraw);
     
+    // TODO(roger): in Cultist, see if there is a function for appending data to a buffer (and resizing buffer when capacity is reached). should be something.
     MapBuffer(&game.vertexBuffer, true);
-        memcpy(game.vertexBuffer.mapped, lineVertices, countOf(lineVertices) * sizeof(Vertex_XYZ));
-        game.vertexBuffer.count += countOf(lineVertices);
+        for (int i = 0; i < 8; i++) {
+            size_t size = countOf(cubeVertices) * sizeof(Vertex_XYZ);
+            Vertex_XYZ* offset = (Vertex_XYZ*)((u8*)game.vertexBuffer.mapped + (i * size)); 
+            memcpy(offset, cubeVertices, size);
+            
+            int xBit = i & 1; 
+            int yBit = (i >> 1) & 1; 
+            int zBit = (i >> 2) & 1;
+            
+            for (int j = 0; j < countOf(cubeVertices); j++) {
+                offset[j].x += xBit;
+                offset[j].y += yBit;
+                offset[j].z += zBit;
+            }
+            
+            game.vertexBuffer.count += countOf(cubeVertices);
+        }
     UnmapBuffer(&game.vertexBuffer);
     
     MapBuffer(&game.indexBuffer, true);
-        memcpy(game.indexBuffer.mapped, lineIndices, countOf(lineIndices) * sizeof(u32));
-        game.indexBuffer.count += countOf(lineIndices);
+        memcpy(game.indexBuffer.mapped, cubeLineIndices, countOf(cubeLineIndices) * sizeof(u32));
+        game.indexBuffer.count += countOf(cubeLineIndices);
+        
+        void* offset = (u8*)game.indexBuffer.mapped + countOf(cubeLineIndices) * sizeof(u32); 
+        memcpy(offset, cubeTriIndices, countOf(cubeTriIndices) * sizeof(u32));
+        game.indexBuffer.count += countOf(cubeTriIndices);
     UnmapBuffer(&game.indexBuffer);
 }
 
@@ -180,8 +216,8 @@ void TickGame() {
     float deltaTime = 1.0f / 60.0f;
     
     // TODO(roger): From Camera.
-    local_persist Vector3 eyePosition = { 0, 0.5f, -5 };
-    eyePosition = RotateY(eyePosition, pi/4 * deltaTime);  
+    local_persist Vector3 eyePosition = { 0, 2, -5 };
+    eyePosition = RotateY(eyePosition, pi/8 * deltaTime);  
     
     Vector3 forward = eyePosition * -1;
     Vector3 up = {0, 1, 0};
@@ -199,14 +235,21 @@ void TickGame() {
             &game.frameConstantBuffer,        
         };
         GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-        Texture* textures[] = { &game.texture };
     
-        SetPipelineState(&game.wireframeMeshPipeline);
         BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
+        
+        SetPipelineState(&game.wireframeMeshPipeline);
         BindVertexBuffers(vertexBuffers, 1);
         BindIndexBuffer(&game.indexBuffer);
-        BindShaderTextures(0, textures, 1);
-        DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        for (int i = 0; i < 8; i++) {
+            // TODO(roger): Hardcoded index count.
+            DrawIndexedVertices(24, 0, i * 8);
+        }
+        
+        SetPipelineState(&game.meshPipeline);
+        // TODO(roger): Hardcoded count and start.
+        DrawIndexedVertices(36, 24, 0);
+
     EndDrawing();
     
     // TODO(roger): Rename to EndFrame()
