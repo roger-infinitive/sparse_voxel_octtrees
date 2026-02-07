@@ -230,10 +230,11 @@ void TickGame() {
     float deltaTime = 1.0f / 60.0f;
     
     // TODO(roger): From Camera.
-    local_persist Vector3 eyePosition = { 0, 2, -5 };
+    local_persist Vector3 eyePosition = { 0, 2, -3 };
     eyePosition = RotateY(eyePosition, pi/8 * deltaTime);  
     
     Vector3 forward = eyePosition * -1;
+    forward.y = 0;
     Vector3 up = {0, 1, 0};
 
     Matrix4 view = LookToLH(eyePosition, forward, up);
@@ -252,12 +253,12 @@ void TickGame() {
     
         BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
-        SetPipelineState(&game.wireframeMeshPipeline);
+        SetPipelineState(&game.meshPipeline);
         BindVertexBuffers(vertexBuffers, 1);
         BindIndexBuffer(&game.indexBuffer);
         for (int i = 0; i < game.instancesToDraw; i++) {
             // TODO(roger): Hardcoded index count.
-            DrawIndexedVertices(24, 0, i * 8);
+            DrawIndexedVertices(36, 24, i * 8);
         }
         
         // SetPipelineState(&game.meshPipeline);
