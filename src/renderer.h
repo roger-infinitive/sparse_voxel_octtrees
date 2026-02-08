@@ -2,7 +2,6 @@
 #define RENDERER_H
 
 #include "game_math.h"
-#include "bucket_array.h"
 
 #ifdef RENDER_D3D11
     #include <d3d11_1.h>
@@ -525,12 +524,6 @@ RenderCommand* RenderCommandStub() {
     ZeroStruct(&_renderCommandStub);
     return &_renderCommandStub;
 }
-
-// NOTE(roger): A 'Render Layer' helps us organize render commands based on the 'sorting layer' of the scene being rendered.
-struct RenderLayer {
-    int sortingLayer;
-    BucketArray<RenderCommand> renderCommands;
-};
 
 void InitializeGpuBuffer(GpuBuffer* buffer, u32 capacity, u32 stride, GraphicsBufferType type, GraphicsBufferUsage usage);
 void ReallocGpuBuffer(GpuBuffer* buffer, u32 newCapacity);

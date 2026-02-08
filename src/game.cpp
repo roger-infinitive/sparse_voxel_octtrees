@@ -1,8 +1,3 @@
-// TODO(roger): Remove from this file.
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#include "inf_image.h"
-
 #include "svo.cpp"
 
 struct Game {
@@ -25,6 +20,8 @@ void* ArenaAlloc(size_t size) {
 Allocator ArenaAllocator {
     ArenaAlloc, 0, 0
 };
+
+void PackSvoMesh(SvoImport* svo, int lvl);
 
 void InitGame(const char* svoFilePath) {
     InitTempAllocator();
@@ -54,149 +51,8 @@ void InitGame(const char* svoFilePath) {
     InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
     InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, DynamicDraw);
     
-    // TODO(roger): in Cultist, see if there is a function for appending data to a buffer (and resizing buffer when capacity is reached). should be something.
-    MapBuffer(&game.vertexBuffer, true);
-    MapBuffer(&game.indexBuffer, true);
-    
-        int lvl = 9;
-    
-        Vector3Int** coordsAtLevel = ALLOC_ARRAY(TempAllocator, Vector3Int*, svo.topLevel + 1);
-        coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
-        coordsAtLevel[0][0] = { 0, 0, 0 };
-
-        for (int i = 0; i < lvl; i++) {
-            int parentCount = svo.nodesAtLevel[i]; 
-            int childCount  = svo.nodesAtLevel[i + 1];
-            coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
-            
-            u32 w = 0;
-            
-            for (int p = 0; p < parentCount; p++) {
-                Vector3Int pc = coordsAtLevel[i][p];
-                u8 parentMask = svo.masksAtLevel[i][p];
-                
-                for (int child = 0; child < 8; child++) {
-                    if (parentMask & (1u << child)) {
-                        int xb = child & 1;
-                        int yb = (child >> 1) & 1;
-                        int zb = (child >> 2) & 1;
-                        
-                        coordsAtLevel[i + 1][w++] = { pc.x * 2 + xb, 
-                                                      pc.y * 2 + yb, 
-                                                      pc.z * 2 + zb };
-                    }
-                }    
-            }
-        }
-        
-        // compute first child for each level + parent index for faster IsFilled check.
-        {
-            svo.firstChild = ALLOC_ARRAY(ArenaAllocator, u32*, lvl);
-            for (int i = 0; i < lvl; ++i) {
-                u32 parentCount = svo.nodesAtLevel[i];
-                svo.firstChild[i] = ALLOC_ARRAY(ArenaAllocator, u32, parentCount);
-                
-                u32 run = 0;
-                for (u32 p = 0; p < parentCount; ++p) {
-                    svo.firstChild[i][p] = run;
-                    run += Popcount8(svo.masksAtLevel[i][p]);
-                }
-                
-                ASSERT_ERROR(run == svo.nodesAtLevel[i + 1], "child count mismatch!"); 
-            }
-        }
-        
-        float rootSize = 8.0f;
-        float s = rootSize / (1 << (lvl + 1));
-        
-        for (int i = 0; i < svo.nodesAtLevel[lvl]; ++i) {
-            Vector3Int c = coordsAtLevel[lvl][i];
-            
-            float x = c.x * s;
-            float y = c.y * s;
-            float z = c.z * s;
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x + 1, c.y, c.z})) { 
-                Vertex_XYZ_N verts[] = {
-                    {s + x, y,     z,     1, 0, 0},
-                    {s + x, s + y, z,     1, 0, 0},
-                    {s + x, s + y, s + z, 1, 0, 0},
-                    {s + x, y,     s + z, 1, 0, 0},
-                };
-                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x - 1, c.y, c.z})) { 
-                Vertex_XYZ_N verts[] = {
-                    {x, y,     z,     -1, 0, 0},
-                    {x, s + y, z,     -1, 0, 0},
-                    {x, s + y, s + z, -1, 0, 0},
-                    {x, y,     s + z, -1, 0, 0},
-                };
-                u32 indices[] = { 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y + 1, c.z})) {
-                Vertex_XYZ_N verts[] = {
-                    {x,     s + y, z,     0, 1, 0},
-                    {x,     s + y, s + z, 0, 1, 0},
-                    {s + x, s + y, s + z, 0, 1, 0},
-                    {s + x, s + y, z,     0, 1, 0},
-                };
-                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y - 1, c.z})) { 
-                Vertex_XYZ_N verts[] = {
-                    {x,     y, z,     0, -1, 0},
-                    {x,     y, s + z, 0, -1, 0},
-                    {s + x, y, s + z, 0, -1, 0},
-                    {s + x, y, z,     0, -1, 0},
-                };
-                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y, c.z + 1})) { 
-                Vertex_XYZ_N verts[] = {
-                    {x,     y,     s + z, 0, 0, 1},
-                    {x,     s + y, s + z, 0, 0, 1},
-                    {s + x, s + y, s + z, 0, 0, 1},
-                    {s + x, y,     s + z, 0, 0, 1},
-                };
-                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-            
-            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y, c.z - 1})) { 
-                Vertex_XYZ_N verts[] = {
-                    {x,     y,     z, 0, 0, -1},
-                    {x,     s + y, z, 0, 0, -1},
-                    {s + x, s + y, z, 0, 0, -1},
-                    {s + x, y,     z, 0, 0, -1},
-                };
-                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
-                
-                AppendData(&game.vertexBuffer, verts, countOf(verts));
-                AppendData(&game.indexBuffer, indices, countOf(indices));
-            }
-        }
-        
-    UnmapBuffer(&game.indexBuffer);
-    UnmapBuffer(&game.vertexBuffer);
+    int lvl = 9;
+    PackSvoMesh(&svo, lvl);
 }
 
 void TickGame() {
@@ -243,4 +99,148 @@ void TickGame() {
     
     // TODO(roger): Rename to EndFrame()
     GraphicsPresent();
+}
+
+void PackSvoMesh(SvoImport* svo, int lvl) {
+    MapBuffer(&game.vertexBuffer, true);
+    MapBuffer(&game.indexBuffer, true);
+        
+        Vector3Int** coordsAtLevel = ALLOC_ARRAY(TempAllocator, Vector3Int*, svo->topLevel + 1);
+        coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
+        coordsAtLevel[0][0] = { 0, 0, 0 };
+
+        for (int i = 0; i < lvl; i++) {
+            int parentCount = svo->nodesAtLevel[i]; 
+            int childCount  = svo->nodesAtLevel[i + 1];
+            coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
+            
+            u32 w = 0;
+            
+            for (int p = 0; p < parentCount; p++) {
+                Vector3Int pc = coordsAtLevel[i][p];
+                u8 parentMask = svo->masksAtLevel[i][p];
+                
+                for (int child = 0; child < 8; child++) {
+                    if (parentMask & (1u << child)) {
+                        int xb = child & 1;
+                        int yb = (child >> 1) & 1;
+                        int zb = (child >> 2) & 1;
+                        
+                        coordsAtLevel[i + 1][w++] = { pc.x * 2 + xb, 
+                                                      pc.y * 2 + yb, 
+                                                      pc.z * 2 + zb };
+                    }
+                }    
+            }
+        }
+        
+        // Compute first child for each level + parent index for faster IsFilled check.
+        
+        svo->firstChild = ALLOC_ARRAY(ArenaAllocator, u32*, lvl);
+        for (int i = 0; i < lvl; ++i) {
+            u32 parentCount = svo->nodesAtLevel[i];
+            svo->firstChild[i] = ALLOC_ARRAY(ArenaAllocator, u32, parentCount);
+            
+            u32 run = 0;
+            for (u32 p = 0; p < parentCount; ++p) {
+                svo->firstChild[i][p] = run;
+                run += Popcount8(svo->masksAtLevel[i][p]);
+            }
+            
+            ASSERT_ERROR(run == svo->nodesAtLevel[i + 1], "child count mismatch!"); 
+        }
+        
+        // Greedy Mesher
+        
+        float rootSize = 8.0f;
+        float s = rootSize / (1 << (lvl + 1));
+        
+        for (int i = 0; i < svo->nodesAtLevel[lvl]; ++i) {
+            Vector3Int c = coordsAtLevel[lvl][i];
+            
+            float x = c.x * s;
+            float y = c.y * s;
+            float z = c.z * s;
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x + 1, c.y, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {s + x, y,     z,     1, 0, 0},
+                    {s + x, s + y, z,     1, 0, 0},
+                    {s + x, s + y, s + z, 1, 0, 0},
+                    {s + x, y,     s + z, 1, 0, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x - 1, c.y, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x, y,     z,     -1, 0, 0},
+                    {x, s + y, z,     -1, 0, 0},
+                    {x, s + y, s + z, -1, 0, 0},
+                    {x, y,     s + z, -1, 0, 0},
+                };
+                u32 indices[] = { 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x, c.y + 1, c.z})) {
+                Vertex_XYZ_N verts[] = {
+                    {x,     s + y, z,     0, 1, 0},
+                    {x,     s + y, s + z, 0, 1, 0},
+                    {s + x, s + y, s + z, 0, 1, 0},
+                    {s + x, s + y, z,     0, 1, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x, c.y - 1, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y, z,     0, -1, 0},
+                    {x,     y, s + z, 0, -1, 0},
+                    {s + x, y, s + z, 0, -1, 0},
+                    {s + x, y, z,     0, -1, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x, c.y, c.z + 1})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y,     s + z, 0, 0, 1},
+                    {x,     s + y, s + z, 0, 0, 1},
+                    {s + x, s + y, s + z, 0, 0, 1},
+                    {s + x, y,     s + z, 0, 0, 1},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(svo, lvl, Vector3Int{c.x, c.y, c.z - 1})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y,     z, 0, 0, -1},
+                    {x,     s + y, z, 0, 0, -1},
+                    {s + x, s + y, z, 0, 0, -1},
+                    {s + x, y,     z, 0, 0, -1},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+        }
+        
+    UnmapBuffer(&game.indexBuffer);
+    UnmapBuffer(&game.vertexBuffer);
 }

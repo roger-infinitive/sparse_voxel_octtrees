@@ -43,7 +43,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         wndClass.hInstance = hInstance;
         wndClass.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYAPP_ICON));
         wndClass.hCursor = LoadCursor(0, IDC_ARROW);
-        wndClass.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        wndClass.hbrBackground = NULL;
         wndClass.lpszMenuName = 0;
         wndClass.lpszClassName = windowClassName;
     
@@ -69,28 +69,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
             0, 0, width, height,
             0, 0, hInstance, 0);
     
-#ifndef EDITOR_MODE
-        if (GetWindowPlacement(window, &previousWindowPlacement)) {
-            int width = monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left;
-            int height = monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top;
-    
-            SetWindowLong(window, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-            SetWindowPos(window, HWND_TOP, monitorInfo.rcMonitor.left,  monitorInfo.rcMonitor.top,
-                                                width, height,
-                                                SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-        }
-#endif
-    
         ASSERT_ERROR(window, "Failed to create window!");
-    
-        // Open the window
-        ShowWindow(window, SW_MAXIMIZE);
-        UpdateWindow(window);
+        ShowWindow(window, SW_HIDE);
     }
     
     // Initalize Renderer
     DX11_InitializeRenderer(window);
     rendererInitialized = true;
+
+    DX11_BeginDrawing();
+    ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
+    DX11_EndDrawing();
+    DX11_GraphicsPresent();
+    
+    ShowWindow(window, SW_MAXIMIZE);
+    UpdateWindow(window);
 
     // NOTE(roger): Minimum timer resolution, in milliseconds for the application.
     // We use this to sleep the application if there is time left over after updating/rendering the game
@@ -213,6 +206,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         case WM_DESTROY: {
             PostQuitMessage(0);
         } break;
+        
+        case WM_ERASEBKGND:
+            return 1;
 
         case WM_SIZE: {
             UINT width = LOWORD(lParam);
