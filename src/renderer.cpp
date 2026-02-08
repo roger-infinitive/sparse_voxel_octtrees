@@ -26,3 +26,13 @@ void InitializeIndexBuffer(GpuBuffer* buffer, u32 capacity, IndexBufferFormat in
     buffer->indexFormat = indexFormat;
     InitializeGpuBuffer(buffer, capacity, stride, IndexBuffer, usage);
 }
+
+void AppendData(GpuBuffer* buffer, void* data, int count) {
+    ASSERT_ERROR((buffer->count + count) < buffer->capacity, "GPU Buffer is not large enough!");
+    ASSERT_ERROR(buffer->mapped != 0, "Buffer not mapped!");
+    
+    size_t memSize = count * buffer->stride;
+    void* dest = (void*)((u8*)buffer->mapped + (buffer->count * buffer->stride)); 
+    memcpy(dest, data, memSize);
+    buffer->count += count;
+}

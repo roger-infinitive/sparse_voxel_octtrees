@@ -384,6 +384,10 @@ const Vector2 Vector2_Right = { 1, 0 };
 const Vector2 Vector2_Down = { 0, -1 };
 const Vector2 Vector2_Left = { -1, 0 };
 
+struct Vector3Int {
+    int x, y, z;
+};
+
 struct Vector3 {
     union {
         struct { float x, y, z; };

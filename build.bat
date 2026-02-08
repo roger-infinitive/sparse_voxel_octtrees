@@ -1,6 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
+call "%VCVARS_PATH%" x64
+
 REM Start timer
 for /f %%i in ('powershell -command "[Environment]::TickCount"') do set START_TIME=%%i
 

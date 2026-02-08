@@ -12,7 +12,6 @@
 #include "renderer_directx11.cpp"
 #include "renderer.cpp"
 
-// TODO(roger): Move
 Vector2 GetClientSize();
 
 #include "game.cpp"
@@ -103,7 +102,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     u32 TICKS_PER_SECOND = 60;
     
-    InitGame();
+    // TODO(roger): Read directory and add selection list in program.
+    // TODO(roger): Add custom sample instead of requiring reviewers to download a sample.
+    InitGame("data/render_me.rsvo");
     
     // Main Loop
     while (true) {
