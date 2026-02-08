@@ -29,7 +29,7 @@ float4 PS(VertexShaderOutput input) : SV_Target {
     float3 L = normalize(float3(0.3f, 0.8f, 0.2f));
 
     float ndotl = saturate(dot(N, L));
-    float ambient = 0.35f;              // raise this to light everything
+    float ambient = 0.45f;
     float3 color = (ambient + (1.0f - ambient) * ndotl).xxx;
 
     return float4(color, 1.0f);

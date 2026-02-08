@@ -27,11 +27,26 @@ void* ArenaAlloc(size_t size) {
     return PushMemory(&game.memArena, size);
 }
 
+Allocator ArenaAllocator {
+    ArenaAlloc, 0, 0
+};
+
 struct SvoImport {
     int topLevel;
     u32* nodesAtLevel;
     u8** masksAtLevel;
+    u32** firstChild;
 };
+
+int Popcount8(u8 mask) {
+    int popcount = 0;
+    for (int j = 0; j < 8; j++) {
+        if (mask & (1 << j)) {
+            popcount += 1;
+        }   
+    }
+    return popcount;
+}
 
 void VerifySvoPopCount(SvoImport* svo) {
     for (int lvl = 0; lvl < svo->topLevel; lvl++) {
@@ -39,12 +54,7 @@ void VerifySvoPopCount(SvoImport* svo) {
         int popcount = 0;
         for (int i = 0; i < count; i++) {
             u8 mask = svo->masksAtLevel[lvl][i];
-            
-            for (int j = 0; j < 8; j++) {
-                if (mask & (1 << j)) {
-                    popcount += 1;
-                }
-            }
+            popcount += Popcount8(mask);
         }
         ASSERT_ERROR(popcount == svo->nodesAtLevel[lvl + 1], "Incorrect popcount for SVO.\n");
         printf("popcount found/import - %d/%d\n", popcount, svo->nodesAtLevel[lvl + 1]);
@@ -100,6 +110,44 @@ struct Vector3Int {
     int x, y, z;
 };
 
+bool IsFilled(SvoImport* svo, int lvl, Vector3Int c) {
+    u32 dim = 1u << lvl;
+    if ((u32)c.x >= dim || (u32)c.y >= dim || (u32)c.z >= dim) { 
+        return false;
+    }
+    
+    int node = 0;
+    for (int i = 0; i < lvl; ++i) {
+        int shift = (lvl - 1) - i;
+        int xb = (c.x >> shift) & 1;
+        int yb = (c.y >> shift) & 1;
+        int zb = (c.z >> shift) & 1;
+        int child = xb | (yb << 1) | (zb << 2);
+        
+        u8 mask = svo->masksAtLevel[i][node];
+        if ((mask & (1u << child)) == 0) {
+            return false; // empty
+        }
+        
+        u8 beforeMask = mask & ((1u << child) - 1u);
+        int rank = Popcount8(beforeMask);
+        node = svo->firstChild[i][node] + rank;
+    }
+    
+    return true;
+}
+
+// TODO(roger): Move
+void AppendData(GpuBuffer* buffer, void* data, int count) {
+    ASSERT_ERROR((buffer->count + count) < buffer->capacity, "GPU Buffer is not large enough!");
+    ASSERT_ERROR(buffer->mapped != 0, "Buffer not mapped!");
+    
+    size_t memSize = count * buffer->stride;
+    void* dest = (void*)((u8*)buffer->mapped + (buffer->count * buffer->stride)); 
+    memcpy(dest, data, memSize);
+    buffer->count += count;
+}
+
 void InitGame() {
     InitTempAllocator();
     InitMemoryArena(&game.memArena, MEGABYTES(256));
@@ -135,20 +183,25 @@ void InitGame() {
     game.meshPipeline.stencilMode = StencilMode_None;
     CreatePipelineState(&game.meshPipeline);
     
+    // TODO(roger): use command line arguments.
     SvoImport svo = LoadSvo("data/svo/xyzrgb_statuette_8k.rsvo", ArenaAlloc);
+    // SvoImport svo = LoadSvo("data/svo/xyzrgb_dragon_16k.rsvo", ArenaAlloc);
     
     // TODO(roger): Use StaticDraw instead.
-    InitializeGpuBuffer(&game.vertexBuffer, countOf(CubeVertices_XYZ_N) * 640000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
-    InitializeIndexBuffer(&game.indexBuffer, countOf(CubeTriIndices_XYZ_N), IndexFormat_U32, DynamicDraw);
+    InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
+    InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, DynamicDraw);
     
     // TODO(roger): in Cultist, see if there is a function for appending data to a buffer (and resizing buffer when capacity is reached). should be something.
     MapBuffer(&game.vertexBuffer, true);
+    MapBuffer(&game.indexBuffer, true);
+    
+        int lvl = 9;
     
         Vector3Int** coordsAtLevel = ALLOC_ARRAY(TempAllocator, Vector3Int*, svo.topLevel + 1);
         coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
         coordsAtLevel[0][0] = { 0, 0, 0 };
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < lvl; i++) {
             int parentCount = svo.nodesAtLevel[i]; 
             int childCount  = svo.nodesAtLevel[i + 1];
             coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
@@ -173,32 +226,116 @@ void InitGame() {
             }
         }
         
-        float rootSize = 8.0f;
-        int lvl = 9;
-        float voxelSize = rootSize / (1 << (lvl + 1));
+        // compute first child for each level + parent index for IsFilled check.
+        {
+            svo.firstChild = ALLOC_ARRAY(ArenaAllocator, u32*, lvl);
+            for (int i = 0; i < lvl; ++i) {
+                u32 parentCount = svo.nodesAtLevel[i];
+                svo.firstChild[i] = ALLOC_ARRAY(ArenaAllocator, u32, parentCount);
+                
+                u32 run = 0;
+                for (u32 p = 0; p < parentCount; ++p) {
+                    svo.firstChild[i][p] = run;
+                    run += Popcount8(svo.masksAtLevel[i][p]);
+                }
+                
+                ASSERT_ERROR(run == svo.nodesAtLevel[i + 1], "child count mismatch!"); 
+            }
+        }
         
+        float rootSize = 8.0f;
+        float s = rootSize / (1 << (lvl + 1));
+        
+        // Greedy meshing with SVO masks
+        // TODO(roger): Better to build use a table instead for neighbor checking? 
         for (int i = 0; i < svo.nodesAtLevel[lvl]; ++i) {
             Vector3Int c = coordsAtLevel[lvl][i];
             
-            size_t memSize = countOf(CubeVertices_XYZ_N) * sizeof(Vertex_XYZ_N);
-            Vertex_XYZ_N* offset = (Vertex_XYZ_N*)((u8*)game.vertexBuffer.mapped + (game.instancesToDraw * memSize)); 
-            memcpy(offset, CubeVertices_XYZ_N, memSize);
+            float x = c.x * s;
+            float y = c.y * s;
+            float z = c.z * s;
             
-            for (int j = 0; j < countOf(CubeVertices_XYZ_N); j++) {
-                offset[j].x = (CubeVertices_XYZ_N[j].x + c.x) * voxelSize;
-                offset[j].y = (CubeVertices_XYZ_N[j].y + c.y) * voxelSize;
-                offset[j].z = (CubeVertices_XYZ_N[j].z + c.z) * voxelSize;
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x + 1, c.y, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {s + x, y,     z,     1, 0, 0},
+                    {s + x, s + y, z,     1, 0, 0},
+                    {s + x, s + y, s + z, 1, 0, 0},
+                    {s + x, y,     s + z, 1, 0, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
             }
-            game.vertexBuffer.count += countOf(CubeVertices_XYZ_N);
-            game.instancesToDraw += 1;
+            
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x - 1, c.y, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x, y,     z,     -1, 0, 0},
+                    {x, s + y, z,     -1, 0, 0},
+                    {x, s + y, s + z, -1, 0, 0},
+                    {x, y,     s + z, -1, 0, 0},
+                };
+                u32 indices[] = { 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y + 1, c.z})) {
+                Vertex_XYZ_N verts[] = {
+                    {x,     s + y, z,     0, 1, 0},
+                    {x,     s + y, s + z, 0, 1, 0},
+                    {s + x, s + y, s + z, 0, 1, 0},
+                    {s + x, s + y, z,     0, 1, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y - 1, c.z})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y, z,     0, -1, 0},
+                    {x,     y, s + z, 0, -1, 0},
+                    {s + x, y, s + z, 0, -1, 0},
+                    {s + x, y, z,     0, -1, 0},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y, c.z + 1})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y,     s + z, 0, 0, 1},
+                    {x,     s + y, s + z, 0, 0, 1},
+                    {s + x, s + y, s + z, 0, 0, 1},
+                    {s + x, y,     s + z, 0, 0, 1},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
+            
+            if (!IsFilled(&svo, lvl, Vector3Int{c.x, c.y, c.z - 1})) { 
+                Vertex_XYZ_N verts[] = {
+                    {x,     y,     z, 0, 0, -1},
+                    {x,     s + y, z, 0, 0, -1},
+                    {s + x, s + y, z, 0, 0, -1},
+                    {s + x, y,     z, 0, 0, -1},
+                };
+                u32 indices[] = { 0 + game.vertexBuffer.count, 1 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 2 + game.vertexBuffer.count, 3 + game.vertexBuffer.count, 0 + game.vertexBuffer.count };
+                
+                AppendData(&game.vertexBuffer, verts, countOf(verts));
+                AppendData(&game.indexBuffer, indices, countOf(indices));
+            }
         }
         
-    UnmapBuffer(&game.vertexBuffer);
-    
-    MapBuffer(&game.indexBuffer, true);
-        memcpy(game.indexBuffer.mapped, CubeTriIndices_XYZ_N, countOf(CubeTriIndices_XYZ_N) * sizeof(u32));
-        game.indexBuffer.count += countOf(CubeTriIndices_XYZ_N);
     UnmapBuffer(&game.indexBuffer);
+    UnmapBuffer(&game.vertexBuffer);
 }
 
 void TickGame() {
@@ -211,7 +348,7 @@ void TickGame() {
     rot += pi/8.0f * deltaTime;
     
     Vector3 center = {1, 0,  1};
-    Vector3 offset = {0, 2, -4};
+    Vector3 offset = {0, 1.5f, -3.5f};
     offset = RotateY(offset, rot);
     
     Vector3 eyePosition = center + offset;
@@ -239,9 +376,7 @@ void TickGame() {
         SetPipelineState(&game.meshPipeline);
         BindVertexBuffers(vertexBuffers, 1);
         BindIndexBuffer(&game.indexBuffer);
-        for (int i = 0; i < game.instancesToDraw; i++) {
-            DrawIndexedVertices(countOf(CubeTriIndices_XYZ_N), 0, i * countOf(CubeVertices_XYZ_N));
-        }
+        DrawIndexedVertices(game.indexBuffer.count, 0, 0);
 
     EndDrawing();
     
