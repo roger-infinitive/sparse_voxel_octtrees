@@ -23,6 +23,133 @@ Allocator ArenaAllocator {
 
 void PackSvoMesh(SvoImport* svo, int lvl);
 
+void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection) {
+    
+    Vector3 v0 = {0, 0, 0};
+    Vector3 v1 = {rootScale, rootScale, rootScale};
+    
+    Vector3 t_min;
+    Vector3 t_max;
+    
+    float invDx = 0;
+    float invDy = 0;
+    float invDz = 0;
+    
+    // X slab
+    if (Abs(rayDirection.x) < EPSILON) {
+        if (rayStart.x < v0.x || rayStart.x > v1.x) {
+            return;
+        }
+        t_min.x = -FLT_MAX; t_max.x = FLT_MAX;
+    } else {
+        invDx = 1.0f / rayDirection.x;
+        float t0 = invDx * (v0.x - rayStart.x);                
+        float t1 = invDx * (v1.x - rayStart.x);                
+        t_min.x = Min(t0, t1);
+        t_max.x = Max(t0, t1);
+    }
+    
+    // Y slab
+    if (Abs(rayDirection.y) < EPSILON) {
+        if (rayStart.y < v0.y || rayStart.y > v1.y) {
+            return;
+        }
+        t_min.y = -FLT_MAX; t_max.y = FLT_MAX;
+    } else {
+        invDy = 1.0f / rayDirection.y;
+        float t0 = invDy * (v0.y - rayStart.y);                
+        float t1 = invDy * (v1.y - rayStart.y);                
+        t_min.y = Min(t0, t1);
+        t_max.y = Max(t0, t1);
+    }
+    
+    // Z slab
+    if (Abs(rayDirection.z) < EPSILON) {
+        if (rayStart.z < v0.z || rayStart.z > v1.z) {
+            return;
+        }
+        t_min.z = -FLT_MAX; t_max.z = FLT_MAX;
+    } else {
+        invDz = 1.0f / rayDirection.z;
+        float t0 = invDz * (v0.z - rayStart.z);                
+        float t1 = invDz * (v1.z - rayStart.z);                
+        t_min.z = Min(t0, t1);
+        t_max.z = Max(t0, t1);
+    }
+    
+    float t_enter = Max(t_min.x, Max(t_min.y, t_min.z));
+    float t_exit  = Min(t_max.x, Min(t_max.y, t_max.z));
+    float t = Max(t_enter, 0.0f);
+    if (t_exit < t) {
+        return;
+    }
+    
+    Vector3 center = (v0 + v1) * 0.5f;
+    Vector3 p = rayStart + (rayDirection * t); 
+    
+    int parent = 0;
+    u8 idx = 0;
+
+    Vector3 corner = v0;
+    if (p.x >= center.x) { idx ^= 1; corner.x = rootScale * 0.5f; }   
+    if (p.y >= center.y) { idx ^= 2; corner.y = rootScale * 0.5f; }   
+    if (p.z >= center.z) { idx ^= 4; corner.z = rootScale * 0.5f; }   
+
+    Vector3Int stepDir;
+    stepDir.x = (rayDirection.x > 0) ? 1 : ((rayDirection.x < 0) ? -1 : 0);
+    stepDir.y = (rayDirection.y > 0) ? 1 : ((rayDirection.y < 0) ? -1 : 0);
+    stepDir.z = (rayDirection.z > 0) ? 1 : ((rayDirection.z < 0) ? -1 : 0);
+
+    // TODO(roger): Add exit condition?
+    while (true) {
+        printf("traversing child idx %hhu in parent %d\n", idx, parent);
+    
+        u8 mask = svo->masksAtLevel[parent][0];
+        if (mask & (1 << idx)) {
+            // node occupied
+            printf("node occupied\n");
+        }
+        
+        // TODO(roger): Calculate scale based on level in octree
+        float scale = rootScale * 0.5f;
+        
+        // TODO(roger): we need to track the current cube corner.
+        Vector3 planes = corner;
+        planes.x += stepDir.x * scale;
+        planes.y += stepDir.y * scale;
+        planes.z += stepDir.z * scale;
+        
+        float tx = invDx * (planes.x - rayStart.x);
+        float ty = invDy * (planes.y - rayStart.y);
+        float tz = invDz * (planes.z - rayStart.z);
+        
+        u8 stepMask = 0;
+        if (tx < ty && tx < tz) {
+            t = tx;
+            stepMask = 1;
+            corner.x += scale;
+        } else if (ty < tz) {
+            t = ty;
+            stepMask = 2;
+            corner.y += scale;
+        } else {
+            t = tz;
+            stepMask = 4;
+            corner.z += scale;
+        }
+        
+        // idx & stepMask is 0 if in bounds, otherwise pop()
+        if (idx & stepMask) {
+            // TODO(roger): Need to implement Push() and Pop() to traverse children octants.
+            // for now we exit as we are only traversing the root children.
+            break;
+        }
+        
+        printf("advance\n");
+        idx ^= stepMask;
+    }
+}
+
 void InitGame(const char* svoFilePath) {
     InitTempAllocator();
     InitMemoryArena(&game.memArena, MEGABYTES(256));
@@ -53,6 +180,8 @@ void InitGame(const char* svoFilePath) {
     
     int lvl = 9;
     PackSvoMesh(&svo, lvl);
+    
+    RaycastSvo(&svo, 8.0f, {-1, -1, -1}, {10, 10, 10});
 }
 
 void TickGame() {
