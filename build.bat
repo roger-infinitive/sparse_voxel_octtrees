@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+call config.bat
 
 call "%VCVARS_PATH%" x64
 
