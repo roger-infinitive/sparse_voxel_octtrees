@@ -1,12 +1,26 @@
 #include "svo.cpp"
 
+#define GIZMO_VERTEX_COUNT  640000
+#define GIZMO_INDEX_COUNT  1280000
+
 struct Game {
     ConstantBuffer gameConstantBuffer;
     ConstantBuffer frameConstantBuffer;
+    
+    ShaderProgram simpleShader;
     ShaderProgram simpleLightShader;
+    
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;
     PipelineState meshPipeline;
+
+    int gizmoVertexCount;
+    Vertex_XYZ* gizmoVertices;
+    int gizmoIndexCount;
+    u32* gizmoIndices;
+    GpuBuffer gizmoVertexBuffer;
+    GpuBuffer gizmoIndexBuffer;
+    PipelineState gizmoPipeline;
     
     MemoryArena memArena;
 };
@@ -23,10 +37,54 @@ Allocator ArenaAllocator {
 
 void PackSvoMesh(SvoImport* svo, int lvl);
 
+void DrawLine(Vector3 v0, Vector3 v1) {
+    int vertexStart = game.gizmoVertexCount;
+    game.gizmoVertices[vertexStart + 0].x = v0.x;
+    game.gizmoVertices[vertexStart + 0].y = v0.y;
+    game.gizmoVertices[vertexStart + 0].z = v0.z;
+    game.gizmoVertices[vertexStart + 1].x = v1.x;
+    game.gizmoVertices[vertexStart + 1].y = v1.y;
+    game.gizmoVertices[vertexStart + 1].z = v1.z;
+    game.gizmoVertexCount += 2;
+    
+    int indexStart = game.gizmoIndexCount;
+    game.gizmoIndices[indexStart + 0] = vertexStart;
+    game.gizmoIndices[indexStart + 1] = vertexStart + 1;
+    game.gizmoIndexCount += 2;
+}
+
+void DrawAABB(Vector3 v0, Vector3 v1) {
+    Vector3 size = v1 - v0;
+    int vertexStart = game.gizmoVertexCount;
+    int indexStart = game.gizmoIndexCount;
+        
+    memcpy(game.gizmoVertices + game.gizmoVertexCount, CubeVertices_XYZ, sizeof(CubeVertices_XYZ));
+    game.gizmoVertexCount += countOf(CubeVertices_XYZ);
+
+    for (int i = vertexStart; i < game.gizmoVertexCount; i++) {
+        game.gizmoVertices[i].x *= size.x;    
+        game.gizmoVertices[i].y *= size.y;    
+        game.gizmoVertices[i].z *= size.z;
+        game.gizmoVertices[i].x += v0.x;    
+        game.gizmoVertices[i].y += v0.y;    
+        game.gizmoVertices[i].z += v0.z;    
+    }
+    
+    memcpy(game.gizmoIndices + game.gizmoIndexCount, CubeLineIndices_XYZ, sizeof(CubeLineIndices_XYZ));
+    game.gizmoIndexCount += countOf(CubeLineIndices_XYZ);
+    
+    for (int i = indexStart; i < game.gizmoIndexCount; i++) {
+        game.gizmoIndices[i] += vertexStart;
+    }
+}
+
 void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection) {
     
     Vector3 v0 = {0, 0, 0};
     Vector3 v1 = {rootScale, rootScale, rootScale};
+    
+    DrawLine(rayStart, rayStart + rayDirection);
+    DrawAABB(v0, v1);
     
     Vector3 t_min;
     Vector3 t_max;
@@ -102,6 +160,11 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
 
     // TODO(roger): Add exit condition?
     while (true) {
+        // TODO(roger): Calculate scale based on level in octree
+        float scale = rootScale * 0.5f;
+        
+        DrawAABB(corner, corner + Vector3{scale, scale, scale});
+        
         printf("traversing child idx %hhu in parent %d\n", idx, parent);
     
         u8 mask = svo->masksAtLevel[parent][0];
@@ -109,9 +172,6 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             // node occupied
             printf("node occupied\n");
         }
-        
-        // TODO(roger): Calculate scale based on level in octree
-        float scale = rootScale * 0.5f;
         
         // TODO(roger): we need to track the current cube corner.
         Vector3 planes = corner;
@@ -162,15 +222,34 @@ void InitGame(const char* svoFilePath) {
     Matrix4 projection = PerspectiveLH(aspect, DegreesToRadians(90), 0.1f, 100.0f);
     UpdateConstantBuffer(&game.gameConstantBuffer, &projection, sizeof(Matrix4));
 
+    game.simpleShader = LoadShader("data/shaders/dx11/simple.fxh", VertexLayout_XYZ);
     game.simpleLightShader = LoadShader("data/shaders/dx11/simple_light.fxh", VertexLayout_XYZ_NORMAL);
 
-    game.meshPipeline.topology = PrimitiveTopology_TriangleList;
-    game.meshPipeline.vertexLayout = VertexLayout_XYZ_NORMAL;
-    game.meshPipeline.rasterizer = Rasterizer_Default;
-    game.meshPipeline.shader = &game.simpleLightShader;
-    game.meshPipeline.blendDesc.enableBlend = false;
-    game.meshPipeline.stencilMode = StencilMode_None;
-    CreatePipelineState(&game.meshPipeline);
+    {
+        PipelineState* pipeline = &game.meshPipeline;
+        pipeline->topology = PrimitiveTopology_TriangleList;
+        pipeline->vertexLayout = VertexLayout_XYZ_NORMAL;
+        pipeline->rasterizer = Rasterizer_Default;
+        pipeline->shader = &game.simpleLightShader;
+        pipeline->blendDesc.enableBlend = false;
+        pipeline->stencilMode = StencilMode_None;
+        CreatePipelineState(pipeline);
+    }
+    
+    {
+        PipelineState* pipeline = &game.gizmoPipeline; 
+        pipeline->topology = PrimitiveTopology_LineList;
+        pipeline->vertexLayout = VertexLayout_XYZ;
+        pipeline->rasterizer = Rasterizer_Default;
+        pipeline->shader = &game.simpleShader;
+        pipeline->blendDesc.enableBlend = false;
+        pipeline->stencilMode = StencilMode_None;
+        CreatePipelineState(pipeline);
+    } 
+    
+    // Allocate CPU side memory for gizmo mesh data
+    game.gizmoVertices = ALLOC_ARRAY(ArenaAllocator, Vertex_XYZ, GIZMO_VERTEX_COUNT);
+    game.gizmoIndices = ALLOC_ARRAY(ArenaAllocator, u32, GIZMO_INDEX_COUNT);
     
     SvoImport svo = LoadSvo(svoFilePath, ArenaAlloc);
     
@@ -178,10 +257,15 @@ void InitGame(const char* svoFilePath) {
     InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
     InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, DynamicDraw);
     
+    InitializeGpuBuffer(&game.gizmoVertexBuffer, GIZMO_VERTEX_COUNT, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
+    InitializeIndexBuffer(&game.gizmoIndexBuffer, GIZMO_INDEX_COUNT, IndexFormat_U32, DynamicDraw);
+    
     int lvl = 9;
     PackSvoMesh(&svo, lvl);
     
-    RaycastSvo(&svo, 8.0f, {-1, -1, -1}, {10, 10, 10});
+    Vector3 rayStart     = { 2.0f, -1.0f, 2.0f };
+    Vector3 rayDirection = { 0.0f, 8.0f, 10.0f };
+    RaycastSvo(&svo, 8.0f, rayStart, rayDirection);
 }
 
 void TickGame() {
@@ -194,7 +278,7 @@ void TickGame() {
     rot += pi/8.0f * deltaTime;
     
     Vector3 center = {1, 0,  1};
-    Vector3 offset = {0, 1.5f, -3.5f};
+    Vector3 offset = {0, 4.25f, -7.5f};
     offset = RotateY(offset, rot);
     
     Vector3 eyePosition = center + offset;
@@ -215,14 +299,33 @@ void TickGame() {
             &game.gameConstantBuffer,        
             &game.frameConstantBuffer,        
         };
-        GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-    
         BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
+        // Draw Voxels
+        
+        GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
         SetPipelineState(&game.meshPipeline);
-        BindVertexBuffers(vertexBuffers, 1);
+        BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
         BindIndexBuffer(&game.indexBuffer);
         DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        
+        // Draw Gizmos
+        
+        game.gizmoVertexBuffer.count = 0;
+        MapBuffer(&game.gizmoVertexBuffer, true);
+            AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
+        UnmapBuffer(&game.gizmoVertexBuffer);
+        
+        game.gizmoVertexBuffer.count = 0;
+        MapBuffer(&game.gizmoIndexBuffer, true);
+            AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
+        UnmapBuffer(&game.gizmoIndexBuffer);
+
+        GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
+        SetPipelineState(&game.gizmoPipeline);
+        BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
+        BindIndexBuffer(&game.gizmoIndexBuffer);
+        DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
 
     EndDrawing();
     
@@ -282,7 +385,7 @@ void PackSvoMesh(SvoImport* svo, int lvl) {
         // Greedy Mesher
         
         float rootSize = 8.0f;
-        float s = rootSize / (1 << (lvl + 1));
+        float s = rootSize / (1 << lvl);
         
         for (int i = 0; i < svo->nodesAtLevel[lvl]; ++i) {
             Vector3Int c = coordsAtLevel[lvl][i];
