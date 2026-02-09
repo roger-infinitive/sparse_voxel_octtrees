@@ -78,7 +78,14 @@ void DrawAABB(Vector3 v0, Vector3 v1) {
     }
 }
 
-void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection) {
+struct SvoStackEntry {
+    Vector3 corner;
+    int parent;
+    int mask_idx;
+    u8 idx;
+};
+
+void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection, int maxDepth) {
     
     Vector3 v0 = {0, 0, 0};
     Vector3 v1 = {rootScale, rootScale, rootScale};
@@ -151,81 +158,101 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     Vector3 center = (v0 + v1) * 0.5f;
     Vector3 p = rayStart + (rayDirection * t); 
     
-    int parent = 0;
-    int mask_idx = 0;
-    u8 idx = 0;
+    // TODO(roger): use stack_index instead, and assert if greater than 32 (never should be unless the octree is extremely subdivided).
+    SvoStackEntry stack[32];
+    SvoStackEntry* current = &stack[0];
+    *current = {};
 
-    Vector3 corner = v0;
-    if (p.x >= center.x) { idx ^= 1; corner.x = rootScale * 0.5f; }   
-    if (p.y >= center.y) { idx ^= 2; corner.y = rootScale * 0.5f; }   
-    if (p.z >= center.z) { idx ^= 4; corner.z = rootScale * 0.5f; }   
+    current->corner = v0;
+    if (p.x >= center.x) { current->idx ^= 1; current->corner.x = rootScale * 0.5f; }   
+    if (p.y >= center.y) { current->idx ^= 2; current->corner.y = rootScale * 0.5f; }   
+    if (p.z >= center.z) { current->idx ^= 4; current->corner.z = rootScale * 0.5f; }   
 
     // TODO(roger): Calculate scale based on level in octree
     float scale = rootScale * 0.5f;
     
+    // TODO(roger): debug only
+    int indentCount = 0;
+    char indents[32];
+    memset(indents, 0, sizeof(indents));
+    
     // TODO(roger): Add exit condition?
     while (true) {
         // TODO(roger): Test with rays along negative axes.
-        Vector3 upperCorner = corner + Vector3{scale, scale, scale};
-        DrawAABB(corner, upperCorner);
-        
-        printf("traversing child idx %hhu in parent %d\n", idx, parent);
+        Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
+        DrawAABB(current->corner, upperCorner);
+        printf("%straversing child idx %hhu in parent %d\n", indents, current->idx, current->parent);
     
-        u8 mask = svo->masksAtLevel[parent][mask_idx];
-        if (mask & (1u << idx)) {
-            center = (corner + upperCorner) * 0.5f;
+        u8 mask = svo->masksAtLevel[current->parent][current->mask_idx];
+        if (mask & (1u << current->idx) && current->parent < maxDepth) {
+            printf("%spush\n", indents);
+            indents[indentCount] = ' ';
+            indentCount += 1;
+
+            center = (current->corner + upperCorner) * 0.5f;
             
             // TODO(roger): Calculate scale based on parent instead.
             scale *= 0.5f;
-            parent += 1;
             
-            u8 beforeMask = mask & ((1u << idx) - 1u);
-            mask_idx = Popcount8(beforeMask);
+            int parent_index = current->parent + 1;
+            u8 beforeMask = mask & ((1u << current->idx) - 1u);
             
-            idx = 0;
-            if (p.x >= center.x) { idx ^= 1; corner.x += scale; }
-            if (p.y >= center.y) { idx ^= 2; corner.y += scale; }
-            if (p.z >= center.z) { idx ^= 4; corner.z += scale; }
+            Vector3 parent_corner = current->corner;
+            current = &stack[parent_index];
+            current->parent = parent_index;
+            current->mask_idx = Popcount8(beforeMask);
             
-            // node occupied
-            printf("node occupied\n");
+            current->idx = 0;
+            current->corner = parent_corner;
+            if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
+            if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
+            if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
+
             continue;
         }
         
         // TODO(roger): This will not work for rays going along a negative axis.
-        Vector3 planes = corner;
-        planes.x += scale;
-        planes.y += scale;
-        planes.z += scale;
-        
-        float tx = invDx * (planes.x - rayStart.x);
-        float ty = invDy * (planes.y - rayStart.y);
-        float tz = invDz * (planes.z - rayStart.z);
+        float tx = invDx * (upperCorner.x - rayStart.x);
+        float ty = invDy * (upperCorner.y - rayStart.y);
+        float tz = invDz * (upperCorner.z - rayStart.z);
         
         u8 stepMask = 0;
         if (tx < ty && tx < tz) {
             t = tx;
             stepMask = 1;
-            corner.x += scale;
         } else if (ty < tz) {
             t = ty;
             stepMask = 2;
-            corner.y += scale;
         } else {
             t = tz;
             stepMask = 4;
-            corner.z += scale;
         }
         
         // idx & stepMask is 0 if in bounds, otherwise pop()
-        if (idx & stepMask) {
-            // TODO(roger): Need to implement Push() and Pop() to traverse children octants.
-            // for now we exit as we are only traversing the root children.
-            break;
+        while (current->idx & stepMask) {
+            if (current->parent == 0) {
+                return;
+            }
+            
+            indentCount -= 1;
+            ASSERT_ERROR(indentCount >= 0, "cannot pop!");
+            indents[indentCount] = 0;
+            printf("%spop\n", indents);
+            
+            scale = rootScale / (1 << current->parent);
+            current = &stack[current->parent - 1];
         }
+
+        printf("%sadvance\n", indents);
+        current->idx ^= stepMask;
         
-        printf("advance\n");
-        idx ^= stepMask;
+        if (stepMask & 1) { 
+            current->corner.x += scale; 
+        } else if (stepMask & 2) { 
+            current->corner.y += scale; 
+        } else { 
+            current->corner.z += scale; 
+        } 
     }
 }
 
@@ -282,9 +309,9 @@ void InitGame(const char* svoFilePath) {
     int lvl = 9;
     PackSvoMesh(&svo, lvl);
     
-    Vector3 rayStart     = { 2.15f, -1.0f, 2.15f };
+    Vector3 rayStart     = { 2.15f, -1.0f, 1.15f };
     Vector3 rayDirection = { 0.0f, 8.0f, 10.0f };
-    RaycastSvo(&svo, 8.0f, rayStart, rayDirection);
+    RaycastSvo(&svo, 8.0f, rayStart, rayDirection, 8);
 }
 
 void TickGame() {
@@ -327,8 +354,7 @@ void TickGame() {
         SetPipelineState(&game.meshPipeline);
         BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
         BindIndexBuffer(&game.indexBuffer);
-        // nocheckin:
-        // DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        DrawIndexedVertices(game.indexBuffer.count, 0, 0);
         
         // Draw Gizmos
         
