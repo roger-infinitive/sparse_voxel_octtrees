@@ -152,6 +152,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     Vector3 p = rayStart + (rayDirection * t); 
     
     int parent = 0;
+    int mask_idx = 0;
     u8 idx = 0;
 
     Vector3 corner = v0;
@@ -159,19 +160,36 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     if (p.y >= center.y) { idx ^= 2; corner.y = rootScale * 0.5f; }   
     if (p.z >= center.z) { idx ^= 4; corner.z = rootScale * 0.5f; }   
 
+    // TODO(roger): Calculate scale based on level in octree
+    float scale = rootScale * 0.5f;
+    
     // TODO(roger): Add exit condition?
     while (true) {
-        // TODO(roger): Calculate scale based on level in octree
-        float scale = rootScale * 0.5f;
-        
-        DrawAABB(corner, corner + Vector3{scale, scale, scale});
+        // TODO(roger): Test with rays along negative axes.
+        Vector3 upperCorner = corner + Vector3{scale, scale, scale};
+        DrawAABB(corner, upperCorner);
         
         printf("traversing child idx %hhu in parent %d\n", idx, parent);
     
-        u8 mask = svo->masksAtLevel[parent][0];
-        if (mask & (1 << idx)) {
+        u8 mask = svo->masksAtLevel[parent][mask_idx];
+        if (mask & (1u << idx)) {
+            center = (corner + upperCorner) * 0.5f;
+            
+            // TODO(roger): Calculate scale based on parent instead.
+            scale *= 0.5f;
+            parent += 1;
+            
+            u8 beforeMask = mask & ((1u << idx) - 1u);
+            mask_idx = Popcount8(beforeMask);
+            
+            idx = 0;
+            if (p.x >= center.x) { idx ^= 1; corner.x += scale; }
+            if (p.y >= center.y) { idx ^= 2; corner.y += scale; }
+            if (p.z >= center.z) { idx ^= 4; corner.z += scale; }
+            
             // node occupied
             printf("node occupied\n");
+            continue;
         }
         
         // TODO(roger): This will not work for rays going along a negative axis.
@@ -264,7 +282,7 @@ void InitGame(const char* svoFilePath) {
     int lvl = 9;
     PackSvoMesh(&svo, lvl);
     
-    Vector3 rayStart     = { 2.0f, -1.0f, 2.0f };
+    Vector3 rayStart     = { 2.15f, -1.0f, 2.15f };
     Vector3 rayDirection = { 0.0f, 8.0f, 10.0f };
     RaycastSvo(&svo, 8.0f, rayStart, rayDirection);
 }
@@ -278,7 +296,7 @@ void TickGame() {
     local_persist float rot = 0;
     rot += pi/8.0f * deltaTime;
     
-    Vector3 center = {1, 0,  1};
+    Vector3 center = {1, 0, 1};
     Vector3 offset = {0, 4.25f, -7.5f};
     offset = RotateY(offset, rot);
     
@@ -309,7 +327,8 @@ void TickGame() {
         SetPipelineState(&game.meshPipeline);
         BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
         BindIndexBuffer(&game.indexBuffer);
-        DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        // nocheckin:
+        // DrawIndexedVertices(game.indexBuffer.count, 0, 0);
         
         // Draw Gizmos
         
