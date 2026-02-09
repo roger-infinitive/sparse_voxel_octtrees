@@ -89,18 +89,26 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     Vector3 t_min;
     Vector3 t_max;
     
-    float invDx = 0;
-    float invDy = 0;
-    float invDz = 0;
+    Vector3Int stepDir;
+    stepDir.x = (rayDirection.x > 0) ? 1 : ((rayDirection.x < 0) ? -1 : 0);
+    stepDir.y = (rayDirection.y > 0) ? 1 : ((rayDirection.y < 0) ? -1 : 0);
+    stepDir.z = (rayDirection.z > 0) ? 1 : ((rayDirection.z < 0) ? -1 : 0);
+    
+    if (Abs(rayDirection.x) < EPSILON) { rayDirection.x = EPSILON * (rayDirection.x < 0 ? -1 : 1); }
+    if (Abs(rayDirection.y) < EPSILON) { rayDirection.y = EPSILON * (rayDirection.y < 0 ? -1 : 1); }
+    if (Abs(rayDirection.z) < EPSILON) { rayDirection.z = EPSILON * (rayDirection.z < 0 ? -1 : 1); }
+    
+    float invDx = 1 / rayDirection.x;
+    float invDy = 1 / rayDirection.y;
+    float invDz = 1 / rayDirection.z;
     
     // X slab
-    if (Abs(rayDirection.x) < EPSILON) {
+    if (stepDir.x == 0) {
         if (rayStart.x < v0.x || rayStart.x > v1.x) {
             return;
         }
         t_min.x = -FLT_MAX; t_max.x = FLT_MAX;
     } else {
-        invDx = 1.0f / rayDirection.x;
         float t0 = invDx * (v0.x - rayStart.x);                
         float t1 = invDx * (v1.x - rayStart.x);                
         t_min.x = Min(t0, t1);
@@ -108,13 +116,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     }
     
     // Y slab
-    if (Abs(rayDirection.y) < EPSILON) {
+    if (stepDir.y == 0) {
         if (rayStart.y < v0.y || rayStart.y > v1.y) {
             return;
         }
         t_min.y = -FLT_MAX; t_max.y = FLT_MAX;
     } else {
-        invDy = 1.0f / rayDirection.y;
         float t0 = invDy * (v0.y - rayStart.y);                
         float t1 = invDy * (v1.y - rayStart.y);                
         t_min.y = Min(t0, t1);
@@ -122,13 +129,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     }
     
     // Z slab
-    if (Abs(rayDirection.z) < EPSILON) {
+    if (stepDir.z == 0) {
         if (rayStart.z < v0.z || rayStart.z > v1.z) {
             return;
         }
         t_min.z = -FLT_MAX; t_max.z = FLT_MAX;
     } else {
-        invDz = 1.0f / rayDirection.z;
         float t0 = invDz * (v0.z - rayStart.z);                
         float t1 = invDz * (v1.z - rayStart.z);                
         t_min.z = Min(t0, t1);
@@ -153,11 +159,6 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     if (p.y >= center.y) { idx ^= 2; corner.y = rootScale * 0.5f; }   
     if (p.z >= center.z) { idx ^= 4; corner.z = rootScale * 0.5f; }   
 
-    Vector3Int stepDir;
-    stepDir.x = (rayDirection.x > 0) ? 1 : ((rayDirection.x < 0) ? -1 : 0);
-    stepDir.y = (rayDirection.y > 0) ? 1 : ((rayDirection.y < 0) ? -1 : 0);
-    stepDir.z = (rayDirection.z > 0) ? 1 : ((rayDirection.z < 0) ? -1 : 0);
-
     // TODO(roger): Add exit condition?
     while (true) {
         // TODO(roger): Calculate scale based on level in octree
@@ -173,11 +174,11 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             printf("node occupied\n");
         }
         
-        // TODO(roger): we need to track the current cube corner.
+        // TODO(roger): This will not work for rays going along a negative axis.
         Vector3 planes = corner;
-        planes.x += stepDir.x * scale;
-        planes.y += stepDir.y * scale;
-        planes.z += stepDir.z * scale;
+        planes.x += scale;
+        planes.y += scale;
+        planes.z += scale;
         
         float tx = invDx * (planes.x - rayStart.x);
         float ty = invDy * (planes.y - rayStart.y);
@@ -294,6 +295,7 @@ void TickGame() {
     NewFrame();
     
     BeginDrawing();
+    
         ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
         ConstantBuffer* constantBuffers[2] = {
             &game.gameConstantBuffer,        
