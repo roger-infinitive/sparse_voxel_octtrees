@@ -402,6 +402,10 @@ Vector3 operator*(Vector3 a, float scalar) {
     return { a.x * scalar, a.y * scalar, a.z * scalar };
 }
 
+float SqrMagnitude(Vector3 v) {
+    return v.x * v.x + v.y * v.y + v.z * v.z;
+}
+
 Vector3 RotateY(Vector3 v, float theta) {
     float s = sinf(theta);
     float c = cosf(theta);

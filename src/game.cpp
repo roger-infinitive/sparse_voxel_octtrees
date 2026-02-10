@@ -10,6 +10,7 @@ struct Camera {
     Vector3 position;
     float yaw;
     float pitch;
+    float speed;
 };
 
 struct Game {
@@ -66,8 +67,8 @@ void DrawLine(Vector3 v0, Vector3 v1) {
     game.gizmoIndexCount += 2;
 }
 
-void DrawAABB(Vector3 v0, Vector3 v1) {
-    Vector3 size = v1 - v0;
+void DrawAABB(Vector3 v0, Vector3 v1, float padding = 0.0001f) {
+    Vector3 size = v1 - v0; 
     int vertexStart = game.gizmoVertexCount;
     int indexStart = game.gizmoIndexCount;
         
@@ -75,12 +76,12 @@ void DrawAABB(Vector3 v0, Vector3 v1) {
     game.gizmoVertexCount += countOf(CubeVertices_XYZ);
 
     for (int i = vertexStart; i < game.gizmoVertexCount; i++) {
-        game.gizmoVertices[i].x *= size.x;    
-        game.gizmoVertices[i].y *= size.y;    
-        game.gizmoVertices[i].z *= size.z;
-        game.gizmoVertices[i].x += v0.x;    
-        game.gizmoVertices[i].y += v0.y;    
-        game.gizmoVertices[i].z += v0.z;    
+        game.gizmoVertices[i].x *= (size.x + padding*2);    
+        game.gizmoVertices[i].y *= (size.y + padding*2);    
+        game.gizmoVertices[i].z *= (size.z + padding*2);
+        game.gizmoVertices[i].x += v0.x - padding;    
+        game.gizmoVertices[i].y += v0.y - padding;    
+        game.gizmoVertices[i].z += v0.z - padding;    
     }
     
     memcpy(game.gizmoIndices + game.gizmoIndexCount, CubeLineIndices_XYZ, sizeof(CubeLineIndices_XYZ));
@@ -94,7 +95,7 @@ void DrawAABB(Vector3 v0, Vector3 v1) {
 struct SvoStackEntry {
     Vector3 corner;
     int mask_idx;
-    u8 idx;
+    s8 idx;
 };
 
 void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection, int maxDepth) {
@@ -195,15 +196,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     indents[indentCount++] = ' ';
     
     for (;;) {
-        // TODO(roger): Test with rays along negative axes.
-        Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
+        Vector3 upper_corner = current->corner + Vector3{scale, scale, scale};
         
         u8 mask = svo->masksAtLevel[lvl][current->mask_idx];
-        if (mask & (1u << current->idx)) {
-            DrawAABB(current->corner, upperCorner);
-            
+        if (mask & (1u << current->idx)) {            
             if (lvl < maxDepth) {
-                center = (current->corner + upperCorner) * 0.5f;
+                center = (current->corner + upper_corner) * 0.5f;
                 scale *= 0.5f;
                 
                 int previous_lvl = lvl;
@@ -223,30 +221,44 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     
                 LOG_MESSAGE("%sPush %d:%hhu\n", indents, lvl, current->idx);
                 indents[indentCount++] = ' ';
-    
+                
                 continue;
+            } else {
+                DrawAABB(current->corner, upper_corner);
             }
         }
+
         
-        // TODO(roger): This will not work for rays going along a negative axis.
-        float tx = invDx * (upperCorner.x - rayStart.x);
-        float ty = invDy * (upperCorner.y - rayStart.y);
-        float tz = invDz * (upperCorner.z - rayStart.z);
+        float x = (stepDir.x > 0) ? upper_corner.x : current->corner.x;
+        float tx = (x - rayStart.x) * invDx;
         
-        u8 stepMask = 0;
+        float y = (stepDir.y > 0) ? upper_corner.y : current->corner.y;
+        float ty = (y - rayStart.y) * invDy;
+        
+        float z = (stepDir.z > 0) ? upper_corner.z : current->corner.z;
+        float tz = (z - rayStart.z) * invDz;
+        
+        s8 stepMask = 0;
         if (tx < ty && tx < tz) {
             t = tx;
-            stepMask = 1;
+            stepMask = 1 * stepDir.x;
         } else if (ty < tz) {
             t = ty;
-            stepMask = 2;
+            stepMask = 2 * stepDir.y;
         } else {
             t = tz;
-            stepMask = 4;
+            stepMask = 4 * stepDir.z;
         }
+
+        // TODO(roger): According to https://www.nvidia.com/docs/IO/88972/nvr-2010-001.pdf
+        // POP can be simplified by mirroring the octree.
+        // This eliminates the need to check the signs of the ray direction. The stepMask can become unsigned.
+        // Then POP can check if (idx & stepMask) == 0 to check if its in bounds of the current level,  otherwise pop() to parent lvl
         
-        // (idx & stepMask) == 0 if in bounds of current level, otherwise pop() to parent
-        while (current->idx & stepMask) {
+        s8 axisBit = (stepMask >= 0) ? stepMask : -stepMask; 
+        s8 isBitSet = (current->idx & axisBit) != 0;
+        
+        while ((stepMask > 0 && isBitSet) || (stepMask < 0 && !isBitSet)) {
             if (lvl == 0) {
                 return;
             }
@@ -256,19 +268,16 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             
             scale *= 2;
             current = &stack[--lvl];
+            isBitSet = (current->idx & axisBit) != 0;
         }
 
-        current->idx ^= stepMask;
+        current->idx += stepMask;
         p = rayStart + (rayDirection * t); 
         LOG_MESSAGE("%sAdvance %d:%d\n", indents, lvl, current->idx);
         
-        if (stepMask & 1) { 
-            current->corner.x += scale; 
-        } else if (stepMask & 2) { 
-            current->corner.y += scale; 
-        } else { 
-            current->corner.z += scale; 
-        }
+        if (axisBit & 1) { current->corner.x += scale * stepDir.x; }   
+        if (axisBit & 2) { current->corner.y += scale * stepDir.y; }   
+        if (axisBit & 4) { current->corner.z += scale * stepDir.z; }  
     }
     
     TempArenaMemoryEnd(tempArena);
@@ -384,8 +393,16 @@ void TickGame() {
         
         movement = Normalize(movement);
         
-        float cameraSpeed = 2.0f;
-        camera->position += movement * cameraSpeed * deltaTime;
+        float maxCameraSpeed = 2.0f;
+        if (SqrMagnitude(movement) < EPSILON) {
+            camera->speed -= 10.0f * deltaTime;
+        } else {
+            camera->speed += 2.0f * deltaTime;
+        }
+        
+        camera->speed = ClampF(camera->speed, 0, maxCameraSpeed);
+        
+        camera->position += movement * camera->speed * deltaTime;
         
         Matrix4 view = LookToLH(camera->position, forward, up);
         UpdateConstantBuffer(&game.frameConstantBuffer, &view, sizeof(Matrix4));
@@ -465,6 +482,8 @@ void TickGame() {
 }
 
 void PackSvoMesh(SvoImport* svo, int lvl) {
+    TempArenaMemory tempArena = TempArenaMemoryBegin(&tempAllocator);
+
     MapBuffer(&game.vertexBuffer, true);
     MapBuffer(&game.indexBuffer, true);
         
@@ -606,4 +625,6 @@ void PackSvoMesh(SvoImport* svo, int lvl) {
         
     UnmapBuffer(&game.indexBuffer);
     UnmapBuffer(&game.vertexBuffer);
+    
+    TempArenaMemoryEnd(tempArena);
 }

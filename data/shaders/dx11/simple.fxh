@@ -22,5 +22,5 @@ VertexShaderOutput VS(VertexShaderInput input) {
 }
 
 float4 PS(VertexShaderOutput input) : SV_Target {
-    return float4(1.0f, 0.0f, 0.0f, 1.0f);
+    return float4(1.0f, 1.0f, 1.0f, 1.0f);
 }

@@ -25,12 +25,16 @@ VertexShaderOutput VS(VertexShaderInput input) {
 }
 
 float4 PS(VertexShaderOutput input) : SV_Target {
-    float3 N = normalize(input.Normal);
-    float3 L = normalize(float3(0.3f, 0.8f, 0.2f));
+    // float3 N = normalize(input.Normal);
+    // float3 L = normalize(float3(0.3f, 0.8f, 0.2f));
 
-    float ndotl = saturate(dot(N, L));
-    float ambient = 0.45f;
-    float3 color = (ambient + (1.0f - ambient) * ndotl).xxx;
+    // float ndotl = saturate(dot(N, L));
+    // float ambient = 0.45f;
+    // float3 color = (ambient + (1.0f - ambient) * ndotl).xxx;
 
-    return float4(color, 1.0f);
+    // return float4(color, 1.0f);
+    
+    float3 n = normalize(input.Normal);
+    float3 c = n * 0.5f + 0.5f;
+    return float4(c, 1);
 }
