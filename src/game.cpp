@@ -343,6 +343,8 @@ void TickGame() {
         mouseDelta = GetMousePosition() - (screenSize * 0.5f);
         mouseDelta.x /= screenSize.x;
         mouseDelta.y /= screenSize.y;
+        if (Abs(mouseDelta.x) < 0.001f) mouseDelta.x = 0;
+        if (Abs(mouseDelta.y) < 0.001f) mouseDelta.y = 0;
     }
     
     // Camera update
