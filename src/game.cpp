@@ -93,12 +93,13 @@ void DrawAABB(Vector3 v0, Vector3 v1) {
 
 struct SvoStackEntry {
     Vector3 corner;
-    int parent;
     int mask_idx;
     u8 idx;
 };
 
 void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection, int maxDepth) {
+
+    TempArenaMemory tempArena = TempArenaMemoryBegin(&tempAllocator);
     
     Vector3 v0 = {0, 0, 0};
     Vector3 v1 = {rootScale, rootScale, rootScale};
@@ -170,10 +171,10 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     
     Vector3 p = rayStart + (rayDirection * t); 
     
-    // TODO(roger): use stack_index instead, and assert if greater than 32 (never should be unless the octree is extremely subdivided).
-    SvoStackEntry stack[32];
-    SvoStackEntry* current = &stack[0];
-    *current = {};
+    int lvl = 0;
+    SvoStackEntry* stack = ALLOC_ARRAY(TempAllocator, SvoStackEntry, maxDepth + 1);
+    SvoStackEntry* current = &stack[lvl];
+    ZeroStruct(current);
 
     // TODO(roger): Calculate scale based on level in octree
     float scale = rootScale * 0.5f;
@@ -189,7 +190,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     char indents[32]; 
     memset(indents, 0, sizeof(indents));
     
-    printf("Push %d:%hhu\n", current->parent, current->idx);
+    printf("Push %d:%hhu\n", lvl, current->idx);
     indents[indentCount++] = ' ';
     
     // TODO(roger): Add exit condition?
@@ -197,28 +198,27 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         // TODO(roger): Test with rays along negative axes.
         Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
         
-        u8 mask = svo->masksAtLevel[current->parent][current->mask_idx];
+        u8 mask = svo->masksAtLevel[lvl][current->mask_idx];
         if (mask & (1u << current->idx)) {
             DrawAABB(current->corner, upperCorner);
             
-            if (current->parent < maxDepth) {
+            if (lvl < maxDepth) {
                 center = (current->corner + upperCorner) * 0.5f;
                 
                 // TODO(roger): Calculate scale based on parent instead.
                 scale *= 0.5f;
                 
-                int previous_parent = current->parent;
+                int previous_lvl = lvl;
                 int previous_mask_idx = current->mask_idx;
-                
-                int parent_index = current->parent + 1;
                 u8 beforeMask = mask & ((1u << current->idx) - 1u);
                 
                 Vector3 parent_corner = current->corner;
-                current = &stack[parent_index];
-                current->parent = parent_index;
+                lvl += 1;
+                ASSERT_ERROR(lvl <= maxDepth, "Exceeded max depth!");
+                current = &stack[lvl];
                 
                 int rank = Popcount8(beforeMask);
-                current->mask_idx = svo->firstChild[previous_parent][previous_mask_idx] + rank;
+                current->mask_idx = svo->firstChild[previous_lvl][previous_mask_idx] + rank;
                 
                 current->idx = 0;
                 current->corner = parent_corner;
@@ -226,7 +226,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
                 if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
                 if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
     
-                printf("%sPush %d:%hhu\n", indents, current->parent, current->idx);
+                printf("%sPush %d:%hhu\n", indents, lvl, current->idx);
                 indents[indentCount++] = ' ';
     
                 continue;
@@ -252,7 +252,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         
         // (idx & stepMask) == 0 if in bounds of current level, otherwise pop() to parent
         while (current->idx & stepMask) {
-            if (current->parent == 0) {
+            if (lvl == 0) {
                 return;
             }
             
@@ -260,12 +260,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             printf("%sPop\n", indents);
             
             scale *= 2;
-            current = &stack[current->parent - 1];
+            current = &stack[--lvl];
         }
 
         current->idx ^= stepMask;
         p = rayStart + (rayDirection * t); 
-        printf("%sAdvance %d:%d\n", indents, current->parent, current->idx);
+        printf("%sAdvance %d:%d\n", indents, lvl, current->idx);
         
         if (stepMask & 1) { 
             current->corner.x += scale; 
@@ -275,6 +275,8 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             current->corner.z += scale; 
         }
     }
+    
+    TempArenaMemoryEnd(tempArena);
 }
 
 void InitGame(const char* svoFilePath) {
