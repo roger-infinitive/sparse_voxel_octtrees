@@ -198,31 +198,34 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
         
         u8 mask = svo->masksAtLevel[current->parent][current->mask_idx];
-        if (mask & (1u << current->idx) && current->parent < maxDepth) {
+        if (mask & (1u << current->idx)) {
             DrawAABB(current->corner, upperCorner);
-            center = (current->corner + upperCorner) * 0.5f;
             
-            // TODO(roger): Calculate scale based on parent instead.
-            scale *= 0.5f;
-            
-            int parent_index = current->parent + 1;
-            u8 beforeMask = mask & ((1u << current->idx) - 1u);
-            
-            Vector3 parent_corner = current->corner;
-            current = &stack[parent_index];
-            current->parent = parent_index;
-            current->mask_idx = Popcount8(beforeMask);
-            
-            current->idx = 0;
-            current->corner = parent_corner;
-            if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
-            if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
-            if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
-
-            printf("%sPush %d:%hhu\n", indents, current->parent, current->idx);
-            indents[indentCount++] = ' ';
-
-            continue;
+            if (current->parent < maxDepth) {
+                center = (current->corner + upperCorner) * 0.5f;
+                
+                // TODO(roger): Calculate scale based on parent instead.
+                scale *= 0.5f;
+                
+                int parent_index = current->parent + 1;
+                u8 beforeMask = mask & ((1u << current->idx) - 1u);
+                
+                Vector3 parent_corner = current->corner;
+                current = &stack[parent_index];
+                current->parent = parent_index;
+                current->mask_idx = Popcount8(beforeMask);
+                
+                current->idx = 0;
+                current->corner = parent_corner;
+                if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
+                if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
+                if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
+    
+                printf("%sPush %d:%hhu\n", indents, current->parent, current->idx);
+                indents[indentCount++] = ' ';
+    
+                continue;
+            }
         }
         
         // TODO(roger): This will not work for rays going along a negative axis.
@@ -278,7 +281,7 @@ void InitGame(const char* svoFilePath) {
     
     Vector2 clientSize = GetClientSize();
     float aspect = clientSize.x / clientSize.y;
-    Matrix4 projection = PerspectiveLH(aspect, DegreesToRadians(90), 0.1f, 100.0f);
+    Matrix4 projection = PerspectiveLH(aspect, DegreesToRadians(90), 0.001f, 100.0f);
     UpdateConstantBuffer(&game.gameConstantBuffer, &projection, sizeof(Matrix4));
 
     game.simpleShader = LoadShader("data/shaders/dx11/simple.fxh", VertexLayout_XYZ);
@@ -321,21 +324,19 @@ void InitGame(const char* svoFilePath) {
     
     int lvl = 9;
     PackSvoMesh(&game.svo, lvl);
-    
-    Vector3 rayStart     = { 2.15f, -1.0f, 1.15f };
-    Vector3 rayDirection = { 0.0f, 8.0f, 10.0f };
-    RaycastSvo(&game.svo, 8.0f, rayStart, rayDirection, 8);
 }
 
 void TickGame() {
     // FPS is fixed to 60.
     float deltaTime = 1.0f / 60.0f;
 
-    HideOsCursor();
-    Vector2 screenSize = GetClientSize();
-    Vector2 mouseDelta = GetMousePosition() - (screenSize * 0.5f);
-    mouseDelta.x /= screenSize.x;
-    mouseDelta.y /= screenSize.y;
+    Vector2 mouseDelta = {};
+    if (isWindowActive) {
+        Vector2 screenSize = GetClientSize();
+        mouseDelta = GetMousePosition() - (screenSize * 0.5f);
+        mouseDelta.x /= screenSize.x;
+        mouseDelta.y /= screenSize.y;
+    }
     
     // Camera update
     Camera* camera = &game.camera;
@@ -450,7 +451,12 @@ void TickGame() {
     // TODO(roger): Rename to EndFrame()
     GraphicsPresent();
     
-    CenterCursorInWindow();
+    if (isWindowActive) {
+        HideOsCursor();
+        CenterCursorInWindow();
+    } else {
+        ShowOsCursor();
+    }
     FlushInput();
 }
 

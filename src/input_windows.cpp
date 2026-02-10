@@ -5,6 +5,10 @@
 extern HWND window;
 
 void ProcessEvents(MSG* msg) {
+    if (!isWindowActive) {
+        return;
+    }
+
     char keyCode = msg->wParam;
     switch (msg->message) {
         case WM_KEYDOWN: {

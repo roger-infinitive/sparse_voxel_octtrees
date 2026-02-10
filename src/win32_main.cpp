@@ -194,7 +194,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     HDC deviceContext;
 
     switch (message) {
+        case WM_ACTIVATEAPP: {
+            isWindowActive = (BOOL)wParam;
+        } break;
+    
         case WM_CREATE: {
+            isWindowActive = true;
             CenterWindow(window);
         } break;
 

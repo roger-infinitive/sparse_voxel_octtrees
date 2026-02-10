@@ -162,6 +162,7 @@ bool currentInputState[INPUT_COUNT];
 bool previousInputState[INPUT_COUNT];
 bool ignoreUntilRelease[INPUT_COUNT];
 bool osCursorVisible = true;
+bool isWindowActive;
 
 void ShowOsCursor();
 void HideOsCursor();
