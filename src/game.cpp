@@ -105,10 +105,6 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     Vector3 v1 = {rootScale, rootScale, rootScale};
     
     DrawLine(rayStart, rayStart + rayDirection);
-    DrawAABB(v0, v1);
-    
-    Vector3 t_min;
-    Vector3 t_max;
     
     Vector3Int stepDir;
     stepDir.x = (rayDirection.x > 0) ? 1 : ((rayDirection.x < 0) ? -1 : 0);
@@ -123,17 +119,20 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     float invDy = 1 / rayDirection.y;
     float invDz = 1 / rayDirection.z;
     
+    Vector3 t_min = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+    Vector3 t_max = {  FLT_MAX,  FLT_MAX,  FLT_MAX };
+    
     // X slab
     if (stepDir.x == 0) {
         if (rayStart.x < v0.x || rayStart.x > v1.x) {
             return;
         }
-        t_min.x = -FLT_MAX; t_max.x = FLT_MAX;
     } else {
-        float t0 = invDx * (v0.x - rayStart.x);                
-        float t1 = invDx * (v1.x - rayStart.x);                
-        t_min.x = Min(t0, t1);
-        t_max.x = Max(t0, t1);
+        t_min.x = invDx * (v0.x - rayStart.x);                
+        t_max.x = invDx * (v1.x - rayStart.x);
+        if (t_max.x < t_min.x) { 
+            SWAP(t_max.x, t_min.x);
+        }
     }
     
     // Y slab
@@ -141,12 +140,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         if (rayStart.y < v0.y || rayStart.y > v1.y) {
             return;
         }
-        t_min.y = -FLT_MAX; t_max.y = FLT_MAX;
     } else {
-        float t0 = invDy * (v0.y - rayStart.y);                
-        float t1 = invDy * (v1.y - rayStart.y);                
-        t_min.y = Min(t0, t1);
-        t_max.y = Max(t0, t1);
+        t_min.y = invDy * (v0.y - rayStart.y);                
+        t_max.y = invDy * (v1.y - rayStart.y);                
+        if (t_max.y < t_min.y) {
+            SWAP(t_max.y, t_min.y);
+        }
     }
     
     // Z slab
@@ -154,32 +153,35 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         if (rayStart.z < v0.z || rayStart.z > v1.z) {
             return;
         }
-        t_min.z = -FLT_MAX; t_max.z = FLT_MAX;
     } else {
-        float t0 = invDz * (v0.z - rayStart.z);                
-        float t1 = invDz * (v1.z - rayStart.z);                
-        t_min.z = Min(t0, t1);
-        t_max.z = Max(t0, t1);
+        t_min.z = invDz * (v0.z - rayStart.z);                
+        t_max.z = invDz * (v1.z - rayStart.z);                
+        if (t_max.z < t_min.z) {
+            SWAP(t_max.z, t_min.z);
+        }
     }
     
-    float t_enter = Max(t_min.x, Max(t_min.y, t_min.z));
-    float t_exit  = Min(t_max.x, Min(t_max.y, t_max.z));
-    float t = Max(t_enter, 0.0f);
-    if (t_exit < t) {
+    float t = Max(t_min.x, Max(t_min.y, t_min.z));
+    float tExit  = Min(t_max.x, Min(t_max.y, t_max.z));
+    t = Max(t, 0.0f);
+
+    // Exit if no point along the ray intersects the root bounding box of the SVO.
+    if (tExit < t) {
         return;
     }
     
-    Vector3 p = rayStart + (rayDirection * t); 
+    DrawAABB(v0, v1);
     
+    // Allocate the stack for recursion through the SVO.
     int lvl = 0;
     SvoStackEntry* stack = ALLOC_ARRAY(TempAllocator, SvoStackEntry, maxDepth + 1);
     SvoStackEntry* current = &stack[lvl];
     ZeroStruct(current);
 
-    // TODO(roger): Calculate scale based on level in octree
     float scale = rootScale * 0.5f;
-
     Vector3 center = (v0 + v1) * 0.5f;
+    Vector3 p = rayStart + (rayDirection * t); 
+
     current->corner = v0;
     if (p.x >= center.x) { current->idx ^= 1; current->corner.x = scale; }   
     if (p.y >= center.y) { current->idx ^= 2; current->corner.y = scale; }   
@@ -189,12 +191,10 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     int indentCount = 0;
     char indents[32]; 
     memset(indents, 0, sizeof(indents));
-    
-    printf("Push %d:%hhu\n", lvl, current->idx);
+    LOG_MESSAGE("Push %d:%hhu\n", lvl, current->idx);
     indents[indentCount++] = ' ';
     
-    // TODO(roger): Add exit condition?
-    while (true) {
+    for (;;) {
         // TODO(roger): Test with rays along negative axes.
         Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
         
@@ -204,29 +204,24 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             
             if (lvl < maxDepth) {
                 center = (current->corner + upperCorner) * 0.5f;
-                
-                // TODO(roger): Calculate scale based on parent instead.
                 scale *= 0.5f;
                 
                 int previous_lvl = lvl;
                 int previous_mask_idx = current->mask_idx;
+                Vector3 previous_corner = current->corner;
+                
                 u8 beforeMask = mask & ((1u << current->idx) - 1u);
-                
-                Vector3 parent_corner = current->corner;
-                lvl += 1;
-                ASSERT_ERROR(lvl <= maxDepth, "Exceeded max depth!");
-                current = &stack[lvl];
-                
                 int rank = Popcount8(beforeMask);
-                current->mask_idx = svo->firstChild[previous_lvl][previous_mask_idx] + rank;
                 
+                current = &stack[++lvl];
+                current->mask_idx = svo->firstChild[previous_lvl][previous_mask_idx] + rank;
                 current->idx = 0;
-                current->corner = parent_corner;
+                current->corner = previous_corner;
                 if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
                 if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
                 if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
     
-                printf("%sPush %d:%hhu\n", indents, lvl, current->idx);
+                LOG_MESSAGE("%sPush %d:%hhu\n", indents, lvl, current->idx);
                 indents[indentCount++] = ' ';
     
                 continue;
@@ -257,7 +252,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             }
             
             indents[--indentCount] = 0;
-            printf("%sPop\n", indents);
+            LOG_MESSAGE("%sPop\n", indents);
             
             scale *= 2;
             current = &stack[--lvl];
@@ -265,7 +260,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
 
         current->idx ^= stepMask;
         p = rayStart + (rayDirection * t); 
-        printf("%sAdvance %d:%d\n", indents, lvl, current->idx);
+        LOG_MESSAGE("%sAdvance %d:%d\n", indents, lvl, current->idx);
         
         if (stepMask & 1) { 
             current->corner.x += scale; 

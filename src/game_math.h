@@ -20,7 +20,7 @@ const float pi = 3.14159265358979323846;
 #define TAU (2 * pi)
 #define EPSILON 1e-6
 #define SQUARE(f) ((f)*(f))
-#define SWAP(f1, f2) { float temp = f1; f1 = f2; f2 = temp; }
+#define SWAP(f1, f2) { float temp = (f1); (f1) = (f2); (f2) = temp; }
 
 int div2_to_zero_count_u32(u32 n) {
     if (n == 0) return 0;
