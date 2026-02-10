@@ -155,7 +155,6 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         return;
     }
     
-    Vector3 center = (v0 + v1) * 0.5f;
     Vector3 p = rayStart + (rayDirection * t); 
     
     // TODO(roger): use stack_index instead, and assert if greater than 32 (never should be unless the octree is extremely subdivided).
@@ -163,32 +162,31 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     SvoStackEntry* current = &stack[0];
     *current = {};
 
-    current->corner = v0;
-    if (p.x >= center.x) { current->idx ^= 1; current->corner.x = rootScale * 0.5f; }   
-    if (p.y >= center.y) { current->idx ^= 2; current->corner.y = rootScale * 0.5f; }   
-    if (p.z >= center.z) { current->idx ^= 4; current->corner.z = rootScale * 0.5f; }   
-
     // TODO(roger): Calculate scale based on level in octree
     float scale = rootScale * 0.5f;
+
+    Vector3 center = (v0 + v1) * 0.5f;
+    current->corner = v0;
+    if (p.x >= center.x) { current->idx ^= 1; current->corner.x = scale; }   
+    if (p.y >= center.y) { current->idx ^= 2; current->corner.y = scale; }   
+    if (p.z >= center.z) { current->idx ^= 4; current->corner.z = scale; }   
     
     // TODO(roger): debug only
     int indentCount = 0;
-    char indents[32];
+    char indents[32]; 
     memset(indents, 0, sizeof(indents));
+    
+    printf("Push %d:%hhu\n", current->parent, current->idx);
+    indents[indentCount++] = ' ';
     
     // TODO(roger): Add exit condition?
     while (true) {
         // TODO(roger): Test with rays along negative axes.
         Vector3 upperCorner = current->corner + Vector3{scale, scale, scale};
-        DrawAABB(current->corner, upperCorner);
-        printf("%straversing child idx %hhu in parent %d\n", indents, current->idx, current->parent);
-    
+        
         u8 mask = svo->masksAtLevel[current->parent][current->mask_idx];
         if (mask & (1u << current->idx) && current->parent < maxDepth) {
-            printf("%spush\n", indents);
-            indents[indentCount] = ' ';
-            indentCount += 1;
-
+            DrawAABB(current->corner, upperCorner);
             center = (current->corner + upperCorner) * 0.5f;
             
             // TODO(roger): Calculate scale based on parent instead.
@@ -207,6 +205,9 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
             if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
             if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
+
+            printf("%sPush %d:%hhu\n", indents, current->parent, current->idx);
+            indents[indentCount++] = ' ';
 
             continue;
         }
@@ -228,23 +229,22 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             stepMask = 4;
         }
         
-        // idx & stepMask is 0 if in bounds, otherwise pop()
+        // (idx & stepMask) == 0 if in bounds of current level, otherwise pop() to parent
         while (current->idx & stepMask) {
             if (current->parent == 0) {
                 return;
             }
             
-            indentCount -= 1;
-            ASSERT_ERROR(indentCount >= 0, "cannot pop!");
-            indents[indentCount] = 0;
-            printf("%spop\n", indents);
+            indents[--indentCount] = 0;
+            printf("%sPop\n", indents);
             
-            scale = rootScale / (1 << current->parent);
+            scale *= 2;
             current = &stack[current->parent - 1];
         }
 
-        printf("%sadvance\n", indents);
         current->idx ^= stepMask;
+        p = rayStart + (rayDirection * t); 
+        printf("%sAdvance %d:%d\n", indents, current->parent, current->idx);
         
         if (stepMask & 1) { 
             current->corner.x += scale; 
@@ -252,7 +252,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             current->corner.y += scale; 
         } else { 
             current->corner.z += scale; 
-        } 
+        }
     }
 }
 
