@@ -543,6 +543,20 @@ Vector3& operator+=(Vector3& a, const Vector3& b) {
     return a;
 }
 
+Vector3& operator-=(Vector3& a, const Vector3& b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    a.z -= b.z;
+    return a;
+}
+
+Vector3& operator*=(Vector3& a, const float& b) {
+    a.x *= b;
+    a.y *= b;
+    a.z *= b;
+    return a;
+}
+
 Vector4 operator+(Vector4 a, Vector4 b) {
     return { a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w };
 }

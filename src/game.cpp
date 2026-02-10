@@ -1,7 +1,16 @@
+#include "input_common.h"
+
 #include "svo.cpp"
+#include "input_common.cpp"
 
 #define GIZMO_VERTEX_COUNT  640000
 #define GIZMO_INDEX_COUNT  1280000
+
+struct Camera {
+    Vector3 position;
+    float yaw;
+    float pitch;
+};
 
 struct Game {
     ConstantBuffer gameConstantBuffer;
@@ -23,6 +32,10 @@ struct Game {
     PipelineState gizmoPipeline;
     
     MemoryArena memArena;
+    
+    SvoImport svo;
+    Camera camera;
+    bool hide_model;
 };
 
 Game game;
@@ -297,7 +310,7 @@ void InitGame(const char* svoFilePath) {
     game.gizmoVertices = ALLOC_ARRAY(ArenaAllocator, Vertex_XYZ, GIZMO_VERTEX_COUNT);
     game.gizmoIndices = ALLOC_ARRAY(ArenaAllocator, u32, GIZMO_INDEX_COUNT);
     
-    SvoImport svo = LoadSvo(svoFilePath, ArenaAlloc);
+    game.svo = LoadSvo(svoFilePath, ArenaAlloc);
     
     // TODO(roger): Use StaticDraw instead.
     InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
@@ -307,34 +320,91 @@ void InitGame(const char* svoFilePath) {
     InitializeIndexBuffer(&game.gizmoIndexBuffer, GIZMO_INDEX_COUNT, IndexFormat_U32, DynamicDraw);
     
     int lvl = 9;
-    PackSvoMesh(&svo, lvl);
+    PackSvoMesh(&game.svo, lvl);
     
     Vector3 rayStart     = { 2.15f, -1.0f, 1.15f };
     Vector3 rayDirection = { 0.0f, 8.0f, 10.0f };
-    RaycastSvo(&svo, 8.0f, rayStart, rayDirection, 8);
+    RaycastSvo(&game.svo, 8.0f, rayStart, rayDirection, 8);
 }
 
 void TickGame() {
-    
     // FPS is fixed to 60.
     float deltaTime = 1.0f / 60.0f;
-    
-    // TODO(roger): From Camera.
-    local_persist float rot = 0;
-    rot += pi/8.0f * deltaTime;
-    
-    Vector3 center = {1, 0, 1};
-    Vector3 offset = {0, 4.25f, -7.5f};
-    offset = RotateY(offset, rot);
-    
-    Vector3 eyePosition = center + offset;
-    Vector3 forward = center - eyePosition;
-    forward.y = 0;
-    forward = Normalize(forward);
-    Vector3 up = {0, 1, 0};
 
-    Matrix4 view = LookToLH(eyePosition, forward, up);
-    UpdateConstantBuffer(&game.frameConstantBuffer, &view, sizeof(Matrix4));
+    HideOsCursor();
+    Vector2 screenSize = GetClientSize();
+    Vector2 mouseDelta = GetMousePosition() - (screenSize * 0.5f);
+    mouseDelta.x /= screenSize.x;
+    mouseDelta.y /= screenSize.y;
+    
+    // Camera update
+    Camera* camera = &game.camera;
+    {
+        float mouseSensitivity = 1.0f;
+        camera->yaw   += mouseDelta.x * mouseSensitivity;
+        camera->pitch -= mouseDelta.y * mouseSensitivity;
+        
+        float pitchLimit = DegreesToRadians(89);    
+        camera->pitch = ClampF(camera->pitch, -pitchLimit, pitchLimit);
+        
+        float cy = cosf(camera->yaw);
+        float sy = sinf(camera->yaw);
+        float cp = cosf(camera->pitch);
+        float sp = sinf(camera->pitch);
+        Vector3 forward = Normalize(Vector3{sy * cp, sp, cy * cp});
+    
+        Vector3 worldUp = {0, 1, 0};
+        Vector3 right = Normalize(CrossProduct(worldUp, forward));
+        Vector3 up = CrossProduct(forward, right);
+        
+        Vector3 movement = {};
+        if (IsInputDown(KEY_W)) {
+            movement += forward;    
+        }
+        if (IsInputDown(KEY_A)) {
+            movement -= right;    
+        }
+        if (IsInputDown(KEY_S)) {
+            movement -= forward;    
+        }
+        if (IsInputDown(KEY_D)) {
+            movement += right;    
+        }
+        if (IsInputDown(KEY_SPACE)) {
+            movement += up;    
+        }
+        if (IsInputDown(KEY_SHIFT)) {
+            movement -= up;    
+        }
+        
+        movement = Normalize(movement);
+        
+        float cameraSpeed = 2.0f;
+        camera->position += movement * cameraSpeed * deltaTime;
+        
+        Matrix4 view = LookToLH(camera->position, forward, up);
+        UpdateConstantBuffer(&game.frameConstantBuffer, &view, sizeof(Matrix4));
+    }
+
+    if (IsInputPressed(KEY_M)) {
+        game.hide_model = !game.hide_model;        
+    }
+    
+    if (IsInputPressed(KEY_R)) {
+        float cy = cosf(camera->yaw);
+        float sy = sinf(camera->yaw);
+        float cp = cosf(camera->pitch);
+        float sp = sinf(camera->pitch);
+        Vector3 forward = Normalize(Vector3{sy * cp, sp, cy * cp});
+        
+        forward *= 12.0f;
+        RaycastSvo(&game.svo, 8.0f, camera->position, forward, 8);
+    }
+    
+    if (IsInputPressed(KEY_C)) {
+        game.gizmoVertexCount = 0;
+        game.gizmoIndexCount  = 0;
+    }
     
     // TODO(roger): Rename to BeginFrame()
     NewFrame();
@@ -349,12 +419,13 @@ void TickGame() {
         BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
         // Draw Voxels
-        
-        GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-        SetPipelineState(&game.meshPipeline);
-        BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
-        BindIndexBuffer(&game.indexBuffer);
-        DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        if (!game.hide_model) {
+            GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
+            SetPipelineState(&game.meshPipeline);
+            BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
+            BindIndexBuffer(&game.indexBuffer);
+            DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        }
         
         // Draw Gizmos
         
@@ -378,6 +449,9 @@ void TickGame() {
     
     // TODO(roger): Rename to EndFrame()
     GraphicsPresent();
+    
+    CenterCursorInWindow();
+    FlushInput();
 }
 
 void PackSvoMesh(SvoImport* svo, int lvl) {

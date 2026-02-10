@@ -15,6 +15,7 @@
 Vector2 GetClientSize();
 
 #include "game.cpp"
+#include "input_windows.cpp"
 
 #define IDI_MYAPP_ICON 101
 
@@ -106,8 +107,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         MSG msg = {};
         while (PeekMessage(&msg, 0, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
-            // TODO(roger): Implement
-            // ProcessEvents(&msg);
+            ProcessEvents(&msg);
             DispatchMessage(&msg);
 
             if (msg.message == WM_QUIT) {
