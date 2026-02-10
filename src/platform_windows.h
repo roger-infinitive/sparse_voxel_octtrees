@@ -249,4 +249,8 @@ u64 FileWrite(File& file, void* buffer, u64 size) {
     return totalWritten;
 }
 
+void QuitGame() {
+    PostQuitMessage(0);
+}
+
 #endif //_WINDOWS_PLATFORM_H_

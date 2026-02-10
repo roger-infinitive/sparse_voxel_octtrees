@@ -20,7 +20,7 @@ const float pi = 3.14159265358979323846;
 #define TAU (2 * pi)
 #define EPSILON 1e-6
 #define SQUARE(f) ((f)*(f))
-#define SWAP(f1, f2) { float temp = f1; f1 = f2; f2 = temp; }
+#define SWAP(f1, f2) { float temp = (f1); (f1) = (f2); (f2) = temp; }
 
 int div2_to_zero_count_u32(u32 n) {
     if (n == 0) return 0;
@@ -402,6 +402,10 @@ Vector3 operator*(Vector3 a, float scalar) {
     return { a.x * scalar, a.y * scalar, a.z * scalar };
 }
 
+float SqrMagnitude(Vector3 v) {
+    return v.x * v.x + v.y * v.y + v.z * v.z;
+}
+
 Vector3 RotateY(Vector3 v, float theta) {
     float s = sinf(theta);
     float c = cosf(theta);
@@ -534,6 +538,27 @@ Vector3 operator+(Vector3 a, Vector3 b) {
 
 Vector3 operator-(Vector3 a, Vector3 b) {
     return { a.x - b.x, a.y - b.y, a.z - b.z };
+}
+
+Vector3& operator+=(Vector3& a, const Vector3& b) {
+    a.x += b.x;
+    a.y += b.y;
+    a.z += b.z;
+    return a;
+}
+
+Vector3& operator-=(Vector3& a, const Vector3& b) {
+    a.x -= b.x;
+    a.y -= b.y;
+    a.z -= b.z;
+    return a;
+}
+
+Vector3& operator*=(Vector3& a, const float& b) {
+    a.x *= b;
+    a.y *= b;
+    a.z *= b;
+    return a;
 }
 
 Vector4 operator+(Vector4 a, Vector4 b) {
