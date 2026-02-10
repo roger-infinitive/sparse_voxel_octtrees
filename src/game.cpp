@@ -207,13 +207,18 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
                 // TODO(roger): Calculate scale based on parent instead.
                 scale *= 0.5f;
                 
+                int previous_parent = current->parent;
+                int previous_mask_idx = current->mask_idx;
+                
                 int parent_index = current->parent + 1;
                 u8 beforeMask = mask & ((1u << current->idx) - 1u);
                 
                 Vector3 parent_corner = current->corner;
                 current = &stack[parent_index];
                 current->parent = parent_index;
-                current->mask_idx = Popcount8(beforeMask);
+                
+                int rank = Popcount8(beforeMask);
+                current->mask_idx = svo->firstChild[previous_parent][previous_mask_idx] + rank;
                 
                 current->idx = 0;
                 current->corner = parent_corner;
