@@ -233,12 +233,6 @@ enum PrimitiveTopology {
     PrimitiveTopology_LineStrip,
 };
 
-enum ShaderBackend {
-    ShaderBackend_GL,
-    ShaderBackend_D3D,
-    ShaderBackend_D3D_CSO,
-};
-
 struct ShaderBuffer {
     char* buffer;
     size_t size;
@@ -246,7 +240,6 @@ struct ShaderBuffer {
 };
 
 struct ShaderProgram {
-    ShaderBackend backend;
     union {
         struct {
             void* handle;

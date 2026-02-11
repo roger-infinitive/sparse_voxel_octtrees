@@ -21,6 +21,14 @@ void InitGame(const char* svoFilePath) {
     game.simpleShader = LoadShader("data/shaders/dx11/simple.fxh", VertexLayout_XYZ);
     game.simpleLightShader = LoadShader("data/shaders/dx11/simple_light.fxh", VertexLayout_XYZ_NORMAL);
 
+    // TODO(roger): Move to renderer_directx11
+    ComputeShader* cs = &game.testComputeShader;
+    const char* computeShaderFile = "data/shaders/dx11/compute_test.hlsl"; 
+    if (D3D_LoadComputeShaderFromFile(computeShaderFile, &cs->dx11.blob)) {
+        HRESULT hr = device->CreateComputeShader((DWORD*)cs->dx11.blob->GetBufferPointer(), cs->dx11.blob->GetBufferSize(), 0, &cs->dx11.shader);
+        ASSERT_DEBUG(hr == 0, "Failed to create compute shader: %s", computeShaderFile);
+    }
+
     {
         PipelineState* pipeline = &game.meshPipeline;
         pipeline->topology = PrimitiveTopology_TriangleList;
@@ -104,43 +112,49 @@ void TickGame() {
     // TODO(roger): Rename to BeginFrame()
     NewFrame();
     
-    BeginDrawing();
+    // BeginDrawing();
     
-        ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
-        ConstantBuffer* constantBuffers[2] = {
-            &game.gameConstantBuffer,        
-            &game.frameConstantBuffer,        
-        };
-        BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
+        // ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
+        // ConstantBuffer* constantBuffers[2] = {
+        //     &game.gameConstantBuffer,        
+        //     &game.frameConstantBuffer,        
+        // };
+        // BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
-        // Draw Voxels
-        if (!game.hide_model) {
-            GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-            SetPipelineState(&game.meshPipeline);
-            BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
-            BindIndexBuffer(&game.indexBuffer);
-            DrawIndexedVertices(game.indexBuffer.count, 0, 0);
-        }
+        // // Draw Voxels
+        // if (!game.hide_model) {
+        //     GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
+        //     SetPipelineState(&game.meshPipeline);
+        //     BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
+        //     BindIndexBuffer(&game.indexBuffer);
+        //     DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        // }
         
-        // Draw Gizmos
+        // // Draw Gizmos
         
-        game.gizmoVertexBuffer.count = 0;
-        MapBuffer(&game.gizmoVertexBuffer, true);
-            AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
-        UnmapBuffer(&game.gizmoVertexBuffer);
+        // game.gizmoVertexBuffer.count = 0;
+        // MapBuffer(&game.gizmoVertexBuffer, true);
+        //     AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
+        // UnmapBuffer(&game.gizmoVertexBuffer);
         
-        game.gizmoVertexBuffer.count = 0;
-        MapBuffer(&game.gizmoIndexBuffer, true);
-            AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
-        UnmapBuffer(&game.gizmoIndexBuffer);
+        // game.gizmoVertexBuffer.count = 0;
+        // MapBuffer(&game.gizmoIndexBuffer, true);
+        //     AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
+        // UnmapBuffer(&game.gizmoIndexBuffer);
 
-        GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
-        SetPipelineState(&game.gizmoPipeline);
-        BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
-        BindIndexBuffer(&game.gizmoIndexBuffer);
-        DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
+        // GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
+        // SetPipelineState(&game.gizmoPipeline);
+        // BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
+        // BindIndexBuffer(&game.gizmoIndexBuffer);
+        // DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
 
-    EndDrawing();
+
+        // nocheckin: testing compute shader
+        Vector2 size = GetClientSize();
+        imContext->CSSetShader(game.testComputeShader.dx11.shader, 0, 0);
+        imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
+
+    // EndDrawing();
     
     // TODO(roger): Rename to EndFrame()
     GraphicsPresent();

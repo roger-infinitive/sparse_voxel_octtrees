@@ -78,10 +78,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     DX11_InitializeRenderer(window);
     rendererInitialized = true;
 
-    DX11_BeginDrawing();
-    ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
-    DX11_EndDrawing();
-    DX11_GraphicsPresent();
+    // nocheckin:
+    // DX11_BeginDrawing();
+    // ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
+    // DX11_EndDrawing();
+    // DX11_GraphicsPresent();
     
     ShowWindow(window, SW_MAXIMIZE);
     UpdateWindow(window);

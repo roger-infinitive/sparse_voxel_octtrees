@@ -7,6 +7,7 @@ struct Game {
     
     ShaderProgram simpleShader;
     ShaderProgram simpleLightShader;
+    ComputeShader testComputeShader;
     
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;

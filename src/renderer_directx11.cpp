@@ -1,15 +1,12 @@
 #include "d3d.cpp"
 #include "dxgi.cpp"
 
-//TODO(roger): This should not depend on "renderState" from cultist_render.h.
-//For example, DX11_SetView and DX11_SetProjection both use the constant buffers from renderState to update matrices.
-//Instead we should set this up inside of the renderer layer and remove them from the cultist_render. This is better, because
-//projection and view updates are more of a renderer layer function than a game rendering function.
-
 //TODO(roger): Create a DX11_RenderContext for all of the external variables similar to what we are doing for DX12.
 
 void* stencilModes[StencilMode_Count];
 IDXGISwapChain1* swapChain;
+ID3D11Texture2D* backBufferTex;
+ID3D11UnorderedAccessView* swapChainSurface;
 // This will be 0 if the swap chain was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.
 // Or if we fail to get the swapChain2. Either way, check if its 0 before usage.
 HANDLE frameLatencyWaitableObject;
@@ -26,6 +23,9 @@ D3D11_VIEWPORT viewport = {};
 Matrix4 projectionMatrix; // typically updated once at beginning of program
 
 void DX11_CreateSwapchainRTV() {
+    // nocheckin:
+    return;
+    
     ID3D11Texture2D* buffer = 0;
     HRESULT result = swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer));
     ASSERT_ERROR(result == 0, "(DX11) Failed to get the back buffer from swap chain.\n");
@@ -301,7 +301,6 @@ void DX11_ReleaseBuffer(GpuBuffer* buffer) {
 
 ShaderProgram DX11_LoadShader(const char* path, VertexLayoutType vertexLayoutType) {
     ShaderProgram program = D3D_LoadShaderText(path, path);
-    program.backend = ShaderBackend_D3D;
 
     ID3DBlob* vertexBytecode = (ID3DBlob*)program.d3d.vsBytecode;
     ID3DBlob* pixelBytecode  = (ID3DBlob*)program.d3d.psBytecode;
@@ -641,27 +640,43 @@ void DX11_NewFrame() {
 void DX11_ResizeGraphics(u32 width, u32 height, Texture* screenTextures, int screenTextureCount) {
     //Resize swapchain buffer and recreate the render target view.
     imContext->OMSetRenderTargets(0, 0, 0);
-    swapchainRTV->Release();
+    if (swapchainRTV) {
+        swapchainRTV->Release();
+    }
+    if (swapChainSurface) {
+        ID3D11UnorderedAccessView* null_uav[1] = { 0 };
+    	imContext->CSSetUnorderedAccessViews(0, 1, null_uav, 0);
+    	swapChainSurface->Release();
+    }
+    if (backBufferTex) {
+        backBufferTex->Release();        
+    }
     depthStencilView->Release();
 
-    UINT swapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
-    // TODO(roger): Handle vsync. Resizing buffers should be in our renderer, and we should track swap chain properties.
-    // if (!vSync) {
-        swapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-    // }
+    UINT swapChainFlags = 0;
+    // nocheckin:
+    // UINT swapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    // // TODO(roger): Handle vsync. Resizing buffers should be in our renderer, and we should track swap chain properties.
+    // // if (!vSync) {
+    //     swapChainFlags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    // // }
 
     // NOTE(roger): set bufferCount: 0 and format: DXGI_FORMAT_UNKNOWN to preserve original values.
     // We must pass in the same swapChainFlags if we wish to preserve them.
     HRESULT result = swapChain->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, swapChainFlags);
     if (FAILED(result)) {
-        char errorMsg[256];
-        sprintf(errorMsg, "ResizeBuffers failed with HRESULT: 0x%08X\n", result);
-        ASSERT_ERROR(false, errorMsg);
+        ASSERT_ERROR(false, "ResizeBuffers failed with HRESULT: 0x%08X\n", result);
     }
 
     DX11_CreateSwapchainRTV();
     DX11_CreateDepthStencilView(width, height);
     DX11_SetViewport(width, height);
+
+    // nocheckin:
+    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+	device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+    // rebind.
+	imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     for (u32 i = 0; i < screenTextureCount; i++) {
         DX11_ResizeRenderTexture(&screenTextures[i], width, height);
@@ -740,34 +755,41 @@ void DX11_InitializeRenderer(HWND window) {
     HRESULT result = CreateDXGIFactory1(__uuidof(IDXGIFactory4), (void**)&dxgiFactory);
     ASSERT_ERROR(result == 0, "(DX12) Failed to create dxgi factory.");
 
-    // Create swap chain that guarentees Flip mode and things like triple buffering.
     DXGI_SWAP_CHAIN_DESC1 scDesc = {};
     scDesc.Width = width;
     scDesc.Height = height;
     scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    // nocheckin
+    // scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scDesc.BufferUsage = DXGI_USAGE_UNORDERED_ACCESS;
     scDesc.SampleDesc.Count = 1;
     // TODO(roger): expose as a setting in a Video menu (double buffer, triple buffer, i.e.)?
-    scDesc.BufferCount = 2;
-    scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    scDesc.Scaling = DXGI_SCALING_NONE;
-    scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+    scDesc.BufferCount = 1;
+    //nocheckin:
+    //scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    scDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
-    scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+    // scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     // if (!vSync) {
-        scDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    // scDesc.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
     // }
 
     result = dxgiFactory->CreateSwapChainForHwnd(device, window, &scDesc, 0, 0, &swapChain);
     ASSERT_ERROR(result == 0, "(DX11) Failed to create swap chain.");
     dxgiFactory->Release();
 
-    IDXGISwapChain2* swapChain2;
-    swapChain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swapChain2);
-    if (swapChain2 != 0) {
-        swapChain2->SetMaximumFrameLatency(1);
-        frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
-    }
+    // nocheckin:
+    // IDXGISwapChain2* swapChain2;
+    // swapChain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swapChain2);
+    // if (swapChain2 != 0) {
+    //     swapChain2->SetMaximumFrameLatency(1);
+    //     frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
+    // }
+    
+    // nocheckin:
+    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+	device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+	imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     DisableAltEnter(window);
 
