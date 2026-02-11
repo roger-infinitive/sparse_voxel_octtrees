@@ -1,5 +1,8 @@
 struct SvoImport {
+    int totalNodeCount;
     int topLevel;
+    u8* masks;
+    
     u32* nodesAtLevel;
     u8** masksAtLevel;
     u32** firstChild;
@@ -52,18 +55,24 @@ SvoImport LoadSvo(const char* filePath, AllocFunc alloc) {
     svo.nodesAtLevel = (u32*)alloc(sizeof(u32) * (svo.topLevel + 1));
     for (int i = 0; i < svo.topLevel + 1; i++) {
         svo.nodesAtLevel[i] = ReadU32(&mb);
+        svo.totalNodeCount += svo.nodesAtLevel[i]; 
     }
     
     ASSERT_ERROR(svo.nodesAtLevel[0] == 1, "Top Level must only have 1 node.");
     
+    svo.masks = (u8*)alloc(sizeof(u8) * svo.totalNodeCount);
     svo.masksAtLevel = (u8**)alloc(sizeof(u8*) * (svo.topLevel + 1));
     svo.masksAtLevel[0] = 0;
 
+    int nodeOffset = 0;
     for (int i = 0; i < svo.topLevel; i++) {
         u32 count = svo.nodesAtLevel[i];
-        u8* masks = (u8*)alloc(sizeof(u8) * count);
-        ReadBytes(&mb, masks, count);
-        svo.masksAtLevel[i] = masks;
+
+        u8* target = svo.masks + nodeOffset;
+        ReadBytes(&mb, target, count);
+        svo.masksAtLevel[i] = target;
+        
+        nodeOffset += count;
     }
     
     ASSERT_ERROR(mb.position == mb.size, "Did not read entire file.");

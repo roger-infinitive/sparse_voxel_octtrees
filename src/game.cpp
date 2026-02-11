@@ -57,15 +57,39 @@ void InitGame(const char* svoFilePath) {
     
     game.svo = LoadSvo(svoFilePath, ArenaAlloc);
     
-    // TODO(roger): Use StaticDraw instead.
-    InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, DynamicDraw);
-    InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, DynamicDraw);
-    
-    InitializeGpuBuffer(&game.gizmoVertexBuffer, GIZMO_VERTEX_COUNT, sizeof(Vertex_XYZ), VertexBuffer, DynamicDraw);
-    InitializeIndexBuffer(&game.gizmoIndexBuffer, GIZMO_INDEX_COUNT, IndexFormat_U32, DynamicDraw);
-    
+    // TODO(roger): With the new raytracer this become redundant. We could introduce a way to toggle between them? or compile with meshes vs. raytracer?
+    InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, GraphicsBufferUsage_Dynamic);
+    InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
     int lvl = 9;
     PackSvoMesh(&game.svo, lvl);
+
+    // Gizmo Rendering
+    InitializeGpuBuffer(&game.gizmoVertexBuffer, GIZMO_VERTEX_COUNT, sizeof(Vertex_XYZ), VertexBuffer, GraphicsBufferUsage_Dynamic);
+    InitializeIndexBuffer(&game.gizmoIndexBuffer, GIZMO_INDEX_COUNT, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
+    
+    // Create a StructuredBuffer for SVO masks
+    {
+        // It would be nice if the SvoImport format mapped to u32 instead.
+        u32* initialData = ALLOC_ARRAY(HeapAllocator, u32, game.svo.totalNodeCount);
+        for (int i = 0; i < game.svo.totalNodeCount; i++) {
+            initialData[i] = game.svo.masks[i];
+        }
+        
+        int elementCount = game.svo.totalNodeCount;
+    
+        // TODO(roger): Move to renderer
+        GpuBuffer svoMaskBuffer = {};
+        svoMaskBuffer.type = StructuredBuffer;
+        svoMaskBuffer.usage = GraphicsBufferUsage_Immutable;
+        svoMaskBuffer.stride = sizeof(u32);
+        svoMaskBuffer.capacity = elementCount;
+        DX11_CreateGraphicsBuffer(&svoMaskBuffer, initialData);
+        
+        ID3D11ShaderResourceView* sbSrv = 0;
+        DX11_CreateStructuredBufferSRV(svoMaskBuffer.dx11.buffer, elementCount, &sbSrv);
+        
+        HeapFree(initialData);
+    }
 }
 
 void TickGame() {
@@ -112,49 +136,48 @@ void TickGame() {
     // TODO(roger): Rename to BeginFrame()
     NewFrame();
     
-    // BeginDrawing();
+    BeginDrawing();
     
-        // ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
-        // ConstantBuffer* constantBuffers[2] = {
-        //     &game.gameConstantBuffer,        
-        //     &game.frameConstantBuffer,        
-        // };
-        // BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
+        ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
+        ConstantBuffer* constantBuffers[2] = {
+            &game.gameConstantBuffer,        
+            &game.frameConstantBuffer,        
+        };
+        BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
-        // // Draw Voxels
-        // if (!game.hide_model) {
-        //     GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-        //     SetPipelineState(&game.meshPipeline);
-        //     BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
-        //     BindIndexBuffer(&game.indexBuffer);
-        //     DrawIndexedVertices(game.indexBuffer.count, 0, 0);
-        // }
+        // Draw Voxels
+        if (!game.hide_model) {
+            GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
+            SetPipelineState(&game.meshPipeline);
+            BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
+            BindIndexBuffer(&game.indexBuffer);
+            DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        }
         
-        // // Draw Gizmos
+        // Draw Gizmos
         
-        // game.gizmoVertexBuffer.count = 0;
-        // MapBuffer(&game.gizmoVertexBuffer, true);
-        //     AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
-        // UnmapBuffer(&game.gizmoVertexBuffer);
+        game.gizmoVertexBuffer.count = 0;
+        MapBuffer(&game.gizmoVertexBuffer, true);
+            AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
+        UnmapBuffer(&game.gizmoVertexBuffer);
         
-        // game.gizmoVertexBuffer.count = 0;
-        // MapBuffer(&game.gizmoIndexBuffer, true);
-        //     AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
-        // UnmapBuffer(&game.gizmoIndexBuffer);
+        game.gizmoVertexBuffer.count = 0;
+        MapBuffer(&game.gizmoIndexBuffer, true);
+            AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
+        UnmapBuffer(&game.gizmoIndexBuffer);
 
-        // GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
-        // SetPipelineState(&game.gizmoPipeline);
-        // BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
-        // BindIndexBuffer(&game.gizmoIndexBuffer);
-        // DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
-
+        GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
+        SetPipelineState(&game.gizmoPipeline);
+        BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
+        BindIndexBuffer(&game.gizmoIndexBuffer);
+        DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
 
         // nocheckin: testing compute shader
-        Vector2 size = GetClientSize();
-        imContext->CSSetShader(game.testComputeShader.dx11.shader, 0, 0);
-        imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
+        // Vector2 size = GetClientSize();
+        // imContext->CSSetShader(game.testComputeShader.dx11.shader, 0, 0);
+        // imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
 
-    // EndDrawing();
+    EndDrawing();
     
     // TODO(roger): Rename to EndFrame()
     GraphicsPresent();

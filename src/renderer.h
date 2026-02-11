@@ -70,12 +70,17 @@ struct GizmoObjectBuffer {
 
 enum GraphicsBufferType {
     VertexBuffer,
-    IndexBuffer
+    IndexBuffer,
+    StructuredBuffer,
+    GraphicsBufferType_Count,
 };
 
 enum GraphicsBufferUsage {
-    StaticDraw,
-    DynamicDraw
+    GraphicsBufferUsage_Default,   // GPU Read+Write
+    GraphicsBufferUsage_Immutable, // GPU Read
+    GraphicsBufferUsage_Dynamic,   // GPU Read, CPU Write
+    GraphicsBufferUsage_Staging,   // GPU Copy to CPU
+    GraphicsBufferUsage_Count
 };
 
 enum IndexBufferFormat {

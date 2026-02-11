@@ -23,8 +23,8 @@ D3D11_VIEWPORT viewport = {};
 Matrix4 projectionMatrix; // typically updated once at beginning of program
 
 void DX11_CreateSwapchainRTV() {
-    // nocheckin:
-    return;
+    // nocheckin: need to clean up our compute shader for swapchain
+    // return;
     
     ID3D11Texture2D* buffer = 0;
     HRESULT result = swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer));
@@ -110,8 +110,18 @@ void DX11_InitializeStencilModes() {
 	ASSERT_ERROR(result == 0, "(DX11) Failed to create stencil state (read mask).\n");
 }
 
+void DX11_CreateStructuredBufferSRV(ID3D11Resource* sbResource, int elementCount, ID3D11ShaderResourceView** srv) {
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = { };
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN; // required for structured buffers
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = elementCount;
+    
+    HRESULT result = device->CreateShaderResourceView(sbResource, &srvDesc, srv);
+    ASSERT_ERROR(result == 0, "DX11_CreateStructuredBufferSRV failed with HRESULT: 0x%08X\n", result);
+}
 
-void DX11_CreateSRV(Texture* texture, int mipLevels, int mostDetailedMip, ID3D11ShaderResourceView** srv) {
+void DX11_CreateTextureSRV(Texture* texture, int mipLevels, int mostDetailedMip, ID3D11ShaderResourceView** srv) {
     D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = { };
     switch(texture->format) {
         case TextureFormat_BGRA8_UNORM: srvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; break;
@@ -126,7 +136,7 @@ void DX11_CreateSRV(Texture* texture, int mipLevels, int mostDetailedMip, ID3D11
     srvDesc.Texture2D.MipLevels = mipLevels;
     
     HRESULT result = device->CreateShaderResourceView(texture->dx11.resource, &srvDesc, srv);
-    ASSERT_ERROR(result == 0, "Failed to create texture view.\n");
+    ASSERT_ERROR(result == 0, "DX11_CreateTextureSRV failed with HRESULT: 0x%08X\n", result);
 }
 
 bool DX11_LoadTexture(u8* data, Texture* texture) {
@@ -193,7 +203,7 @@ bool DX11_LoadTexture(u8* data, Texture* texture) {
 
     HeapFree(initData);
 
-    DX11_CreateSRV(texture, texture->mipLevels, 0, &texture->dx11.srv);
+    DX11_CreateTextureSRV(texture, texture->mipLevels, 0, &texture->dx11.srv);
   
     texture->isRenderTarget = false;
     return result == 0;
@@ -517,28 +527,29 @@ void DX11_UnmapBuffer(GpuBuffer* buffer) {
 void DX11_CreateGraphicsBuffer(GpuBuffer* buffer, void* initialData) {
     D3D11_BUFFER_DESC desc = {};
 
-    // Set buffer type
-    switch (buffer->type) {
-        case VertexBuffer: {
-            desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        } break;
-        case IndexBuffer: {
-            desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
-        } break;
-    }
+    UINT bindFlags[GraphicsBufferType_Count] = {
+        D3D11_BIND_VERTEX_BUFFER,   // VertexBuffer
+        D3D11_BIND_INDEX_BUFFER,    // IndexBuffer
+        D3D11_BIND_SHADER_RESOURCE, // StructuredBuffer
+    };
 
-    // Set buffer usage
-    switch (buffer->usage) {
-        case StaticDraw: {
-            desc.Usage = D3D11_USAGE_DEFAULT;
-            desc.CPUAccessFlags = 0;
-        } break;
+    D3D11_USAGE usages[GraphicsBufferUsage_Count] = {
+        D3D11_USAGE_DEFAULT,   // GraphicsBufferUsage_Default
+        D3D11_USAGE_IMMUTABLE, // GraphicsBufferUsage_Immutable
+        D3D11_USAGE_DYNAMIC,   // GraphicsBufferUsage_Dynamic
+        D3D11_USAGE_STAGING,   // GraphicsBufferUsage_Staging
+    };
+    
+    UINT cpuAccessFlags[GraphicsBufferUsage_Count] = {
+        0,
+        0,
+        D3D11_CPU_ACCESS_WRITE,
+        0,
+    };
 
-        case DynamicDraw: {
-            desc.Usage = D3D11_USAGE_DYNAMIC;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        } break;
-    }
+    desc.BindFlags      = bindFlags[buffer->type];
+    desc.Usage          = usages[buffer->usage];
+    desc.CPUAccessFlags = cpuAccessFlags[buffer->usage];
 
     // Set up initial data
     D3D11_SUBRESOURCE_DATA* initData = 0;
@@ -549,10 +560,16 @@ void DX11_CreateGraphicsBuffer(GpuBuffer* buffer, void* initialData) {
     }
 
     desc.ByteWidth = buffer->stride * buffer->capacity;
-    desc.MiscFlags = 0;
+    
+    if (buffer->type == StructuredBuffer) {
+        desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        desc.StructureByteStride = buffer->stride;
+    } else {
+        desc.MiscFlags = 0;
+    }
 
     HRESULT result = device->CreateBuffer(&desc, initData, &buffer->dx11.buffer);
-    ASSERT_ERROR(result == 0, "(DX11) Failed to create buffer.\n");
+    ASSERT_ERROR(result == 0, "DX11_CreateGraphicsBuffer failed with HRESULT: 0x%08X\n", result);
 }
 
 D3D11_BLEND DX11_Blend(BlendType type) {
@@ -654,7 +671,7 @@ void DX11_ResizeGraphics(u32 width, u32 height, Texture* screenTextures, int scr
     depthStencilView->Release();
 
     UINT swapChainFlags = 0;
-    // nocheckin:
+    // nocheckin: clean up compute shader stuff
     // UINT swapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     // // TODO(roger): Handle vsync. Resizing buffers should be in our renderer, and we should track swap chain properties.
     // // if (!vSync) {
@@ -672,11 +689,11 @@ void DX11_ResizeGraphics(u32 width, u32 height, Texture* screenTextures, int scr
     DX11_CreateDepthStencilView(width, height);
     DX11_SetViewport(width, height);
 
-    // nocheckin:
-    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
-	device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
-    // rebind.
-	imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
+    // nocheckin: for compute shader.
+    // swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+    // device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+    // // rebind.
+    // imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     for (u32 i = 0; i < screenTextureCount; i++) {
         DX11_ResizeRenderTexture(&screenTextures[i], width, height);
@@ -759,15 +776,15 @@ void DX11_InitializeRenderer(HWND window) {
     scDesc.Width = width;
     scDesc.Height = height;
     scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    // nocheckin
-    // scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scDesc.BufferUsage = DXGI_USAGE_UNORDERED_ACCESS;
+    // nocheckin: for compute shader
+    // scDesc.BufferUsage = DXGI_USAGE_UNORDERED_ACCESS;
+    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     scDesc.SampleDesc.Count = 1;
     // TODO(roger): expose as a setting in a Video menu (double buffer, triple buffer, i.e.)?
-    scDesc.BufferCount = 1;
-    //nocheckin:
-    //scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    scDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    scDesc.BufferCount = 2;
+    // nocheckin: for compute shader?
+    // scDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     // scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     // if (!vSync) {
@@ -778,7 +795,7 @@ void DX11_InitializeRenderer(HWND window) {
     ASSERT_ERROR(result == 0, "(DX11) Failed to create swap chain.");
     dxgiFactory->Release();
 
-    // nocheckin:
+    // nocheckin: clean up compute shader stuff.
     // IDXGISwapChain2* swapChain2;
     // swapChain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&swapChain2);
     // if (swapChain2 != 0) {
@@ -786,10 +803,10 @@ void DX11_InitializeRenderer(HWND window) {
     //     frameLatencyWaitableObject = swapChain2->GetFrameLatencyWaitableObject();
     // }
     
-    // nocheckin:
-    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
-	device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
-	imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
+    // nocheckin: for compute shader
+    // swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+    // device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+    // imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     DisableAltEnter(window);
 
