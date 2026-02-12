@@ -25,6 +25,7 @@ void InitGame(const char* svoFilePath) {
     ASSERT_ERROR(sizeof(SvoComputeParams) % 16 == 0, "SvoComputeParams memory size needs to be a multiple of 16");
     
     ZeroStruct(&game.camera);
+    game.camera.position = { 0.5f, 0.5f, -1.0f };
 
     InitTempAllocator();
     InitMemoryArena(&game.memArena, MEGABYTES(2048));
@@ -86,29 +87,29 @@ void InitGame(const char* svoFilePath) {
     // Create a StructuredBuffer for SVO masks
     {
         // It would be nice if the SvoImport format mapped to u32 instead.
-        u32* initialData = ALLOC_ARRAY(HeapAllocator, u32, game.svo.totalNodeCount);
-        for (int i = 0; i < game.svo.totalNodeCount; i++) {
+        u32* initialData = ALLOC_ARRAY(HeapAllocator, u32, game.svo.internalNodeCount);
+        for (int i = 0; i < game.svo.internalNodeCount; i++) {
             initialData[i] = game.svo.masks[i];
         }
         
         // TODO(roger): Move to renderer
-        GpuBuffer svoMaskBuffer = {};
-        svoMaskBuffer.type = StructuredBuffer;
-        svoMaskBuffer.usage = GraphicsBufferUsage_Immutable;
-        svoMaskBuffer.stride = sizeof(u32);
-        svoMaskBuffer.capacity = game.svo.totalNodeCount;
-        CreateGraphicsBuffer(&svoMaskBuffer, initialData);
-        DX11_CreateStructuredBufferSRV(svoMaskBuffer.dx11.buffer, game.svo.totalNodeCount, &game.svoMasksSrv);
+        game.svoMaskBuffer = {};
+        game.svoMaskBuffer.type = StructuredBuffer;
+        game.svoMaskBuffer.usage = GraphicsBufferUsage_Immutable;
+        game.svoMaskBuffer.stride = sizeof(u32);
+        game.svoMaskBuffer.capacity = game.svo.internalNodeCount;
+        CreateGraphicsBuffer(&game.svoMaskBuffer, initialData);
+        DX11_CreateStructuredBufferSRV(game.svoMaskBuffer.dx11.buffer, game.svo.internalNodeCount, &game.svoMasksSrv);
         
         HeapFree(initialData);
         
-        GpuBuffer svoFirstChildBuffer = {};
-        svoFirstChildBuffer.type = StructuredBuffer;
-        svoFirstChildBuffer.usage = GraphicsBufferUsage_Immutable;
-        svoFirstChildBuffer.stride = sizeof(u32);
-        svoFirstChildBuffer.capacity = game.svo.firstChildCount;
-        CreateGraphicsBuffer(&svoFirstChildBuffer, game.svo.firstChild);
-        DX11_CreateStructuredBufferSRV(svoFirstChildBuffer.dx11.buffer, game.svo.firstChildCount, &game.svoFirstChildSrv);
+        game.svoFirstChildBuffer = {};
+        game.svoFirstChildBuffer.type = StructuredBuffer;
+        game.svoFirstChildBuffer.usage = GraphicsBufferUsage_Immutable;
+        game.svoFirstChildBuffer.stride = sizeof(u32);
+        game.svoFirstChildBuffer.capacity = game.svo.firstChildCount;
+        CreateGraphicsBuffer(&game.svoFirstChildBuffer, game.svo.firstChild);
+        DX11_CreateStructuredBufferSRV(game.svoFirstChildBuffer.dx11.buffer, game.svo.firstChildCount, &game.svoFirstChildSrv);
     }
 }
 
@@ -202,7 +203,7 @@ void TickGame() {
         params.screenHeight = (u32)size.y;
         params.fov = DegreesToRadians(90);
         params.aspect = size.x / size.y;
-        params.maskCount = game.svo.totalNodeCount; 
+        params.maskCount = game.svo.internalNodeCount; 
         params.cameraPos = game.camera.position;
         params.cameraUp = game.camera.up;
         params.cameraRight = game.camera.right;
@@ -484,7 +485,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         
         u8 mask = svo->masks[current->mask_idx];
         if (mask & (1u << current->idx)) {            
-            if (lvl < maxDepth) {
+            if (lvl + 1 < maxDepth) {
                 center = (current->corner + upper_corner) * 0.5f;
                 scale *= 0.5f;
                 
@@ -514,15 +515,24 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
             }
         }
 
+        float tx = FLT_MAX;
+        float ty = FLT_MAX;
+        float tz = FLT_MAX;
         
-        float x = (stepDir.x > 0) ? upper_corner.x : current->corner.x;
-        float tx = (x - rayStart.x) * invDx;
+        if (stepDir.x != 0) {
+            float x = (stepDir.x > 0) ? upper_corner.x : current->corner.x;
+            tx = (x - rayStart.x) * invDx;
+        }
         
-        float y = (stepDir.y > 0) ? upper_corner.y : current->corner.y;
-        float ty = (y - rayStart.y) * invDy;
+        if (stepDir.y != 0) {
+            float y = (stepDir.y > 0) ? upper_corner.y : current->corner.y;
+            ty = (y - rayStart.y) * invDy;
+        }
         
-        float z = (stepDir.z > 0) ? upper_corner.z : current->corner.z;
-        float tz = (z - rayStart.z) * invDz;
+        if (stepDir.z != 0) {
+            float z = (stepDir.z > 0) ? upper_corner.z : current->corner.z;
+            tz = (z - rayStart.z) * invDz;
+        }
         
         s8 stepMask = 0;
         if (tx < ty && tx < tz) {

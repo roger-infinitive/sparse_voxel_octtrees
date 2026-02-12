@@ -1,5 +1,5 @@
 struct SvoImport {
-    u32 totalNodeCount;
+    u32 internalNodeCount;
     int topLevel;
     u8* masks;
     
@@ -61,12 +61,16 @@ SvoImport LoadSvo(const char* filePath, AllocFunc alloc) {
     svo.nodesAtLevel = (u32*)alloc(sizeof(u32) * (svo.topLevel + 1));
     for (int i = 0; i < svo.topLevel + 1; i++) {
         svo.nodesAtLevel[i] = ReadU32(&mb);
-        svo.totalNodeCount += svo.nodesAtLevel[i]; 
+    }
+    
+    svo.internalNodeCount = 0;
+    for (int i = 0; i < svo.topLevel; i++) {
+        svo.internalNodeCount += svo.nodesAtLevel[i];
     }
     
     ASSERT_ERROR(svo.nodesAtLevel[0] == 1, "Top Level must only have 1 node.");
     
-    svo.masks = (u8*)alloc(sizeof(u8) * svo.totalNodeCount);
+    svo.masks = (u8*)alloc(sizeof(u8) * svo.internalNodeCount);
 
     size_t nodeOffset = 0;
     for (int i = 0; i < svo.topLevel; i++) {
@@ -77,7 +81,7 @@ SvoImport LoadSvo(const char* filePath, AllocFunc alloc) {
     }
     
     svo.firstChildCount = 0;
-    svo.firstChild = (u32*)alloc(sizeof(u32) * nodeOffset);
+    svo.firstChild = (u32*)alloc(sizeof(u32) * svo.internalNodeCount);
     
     u32 run = 1;
     for (int i = 0; i < svo.topLevel; ++i) {

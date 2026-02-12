@@ -10,6 +10,9 @@ struct Game {
     
     ComputeShader svoComputeShader;
     ConstantBuffer svoComputeConstantBuffer;
+    GpuBuffer svoMaskBuffer;
+    GpuBuffer svoFirstChildBuffer;
+
     ID3D11ShaderResourceView* svoMasksSrv;
     ID3D11ShaderResourceView* svoFirstChildSrv;
     

@@ -1,3 +1,5 @@
+// so this crashes / freezes when I move the camera to left on start up when origin is 0, 0, 0
+
 StructuredBuffer<uint> Mask       : register(t0);
 StructuredBuffer<uint> FirstChild : register(t1);
 
@@ -19,8 +21,7 @@ cbuffer Params : register(b0) {
 }
 
 // TODO(roger): Pass into shader.
-// nocheckin: for some reason, 4 works but not 5...
-#define MAX_SVO_DEPTH 4
+#define MAX_SVO_DEPTH 13
 #define EPSILON 1e-6
 #define LARGE_FLOAT 1e30
 
@@ -130,9 +131,9 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
     float3 center = (corner + upper_corner) * 0.5f;
     float3 p = ray_start + (ray_dir * t);
     
-    if (p.x >= center.x) { stack[lvl].idx ^= 1; stack[lvl].corner.x = scale; }   
-    if (p.y >= center.y) { stack[lvl].idx ^= 2; stack[lvl].corner.y = scale; }   
-    if (p.z >= center.z) { stack[lvl].idx ^= 4; stack[lvl].corner.z = scale; }
+    if (p.x >= center.x) { stack[lvl].idx ^= 1; stack[lvl].corner.x += scale; }   
+    if (p.y >= center.y) { stack[lvl].idx ^= 2; stack[lvl].corner.y += scale; }   
+    if (p.z >= center.z) { stack[lvl].idx ^= 4; stack[lvl].corner.z += scale; }
     
     int last_axis_bit = 0;
     {
@@ -144,14 +145,9 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
         else                          last_axis_bit = 4;
     }
         
-    while (true) {
+    while (true) {        
         upper_corner = stack[lvl].corner + float3(scale, scale, scale);
         uint mask = Mask[stack[lvl].mask_idx] & 0xFFu;
-        
-        if (stack[lvl].mask_idx >= MaskCount) {
-            out_hit.failed = 1;
-            return out_hit;
-        }
         
         // PUSH
         if (mask & (1u << stack[lvl].idx)) {        
@@ -190,15 +186,25 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
                 return out_hit;
             }
         }
-                
-        float x = (step_dir.x > 0) ? upper_corner.x : stack[lvl].corner.x;
-        float tx = (x - ray_start.x) * invDx;
         
-        float y = (step_dir.y > 0) ? upper_corner.y : stack[lvl].corner.y;
-        float ty = (y - ray_start.y) * invDy;
+        float tx = LARGE_FLOAT;
+        float ty = LARGE_FLOAT;
+        float tz = LARGE_FLOAT;
         
-        float z = (step_dir.z > 0) ? upper_corner.z : stack[lvl].corner.z;
-        float tz = (z - ray_start.z) * invDz;
+        if (step_dir.x != 0) {
+            float x = (step_dir.x > 0) ? upper_corner.x : stack[lvl].corner.x;
+            tx = (x - ray_start.x) * invDx;
+        }
+        
+        if (step_dir.y != 0) {
+            float y = (step_dir.y > 0) ? upper_corner.y : stack[lvl].corner.y;
+            ty = (y - ray_start.y) * invDy;
+        }
+        
+        if (step_dir.z != 0) {
+            float z = (step_dir.z > 0) ? upper_corner.z : stack[lvl].corner.z;
+            tz = (z - ray_start.z) * invDz;
+        }
         
         int step_mask = 0;
         if (tx < ty && tx < tz) {
@@ -227,7 +233,6 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
         }
         
         stack[lvl].idx += step_mask;
-        
         p = ray_start + (ray_dir * t);
         
         last_axis_bit = axis_bit;
@@ -265,6 +270,8 @@ void CS(uint3 tid : SV_DispatchThreadID) {
     OutColor[tid.xy] = float4(0,1,0,1);
     if (ray_hit.hit != 0) {
         OutColor[tid.xy] = float4(0.5 * (ray_hit.normal + 1.0), 1.0);
+    } else if (ray_hit.failed == 3) {
+        OutColor[tid.xy] = float4(1,0,0,1);
     } else {
         OutColor[tid.xy] = float4(0.1,0.1,0.1,1);
     }
