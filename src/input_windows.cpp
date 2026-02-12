@@ -9,7 +9,7 @@ void ProcessEvents(MSG* msg) {
         return;
     }
 
-    char keyCode = msg->wParam;
+    u8 keyCode = (u8)msg->wParam;
     switch (msg->message) {
         case WM_KEYDOWN: {
             // Assuming eventData->keyCode corresponds to our InputCode value.

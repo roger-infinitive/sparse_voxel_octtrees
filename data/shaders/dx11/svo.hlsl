@@ -12,7 +12,8 @@ cbuffer Params : register(b0) {
     float Aspect;
     
     uint MaskCount;
-    float3 _pad4;
+    uint MaxDepth;
+    float2 _pad4;
     
     float3 CameraPos;     float _pad0;
     float3 CameraRight;   float _pad1;
@@ -21,7 +22,7 @@ cbuffer Params : register(b0) {
 }
 
 // TODO(roger): Pass into shader.
-#define MAX_SVO_DEPTH 13
+#define MAX_SVO_DEPTH 32
 #define EPSILON 1e-6
 #define LARGE_FLOAT 1e30
 
@@ -35,7 +36,6 @@ struct SvoRayHit {
     uint hit;
     float t;
     float3 normal;
-    uint failed;
 };
 
 struct SvoStackEntry {
@@ -151,7 +151,7 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
         
         // PUSH
         if (mask & (1u << stack[lvl].idx)) {        
-            if (lvl + 1 < MAX_SVO_DEPTH) {
+            if (lvl + 1 < MaxDepth) {
                 center = (stack[lvl].corner + upper_corner) * 0.5f;
                 scale *= 0.5f;
                 
@@ -165,11 +165,6 @@ SvoRayHit SvoRaycast(float3 ray_start, float3 ray_dir) {
                 stack[lvl].mask_idx = FirstChild[previous_mask_idx] + countbits(before_mask);
                 stack[lvl].idx = 0;
 
-                if (stack[lvl].mask_idx >= MaskCount) {
-                    out_hit.failed = 1;
-                    return out_hit;
-                }
-                
                 if (p.x >= center.x) { stack[lvl].idx ^= 1; stack[lvl].corner.x += scale; }
                 if (p.y >= center.y) { stack[lvl].idx ^= 2; stack[lvl].corner.y += scale; }
                 if (p.z >= center.z) { stack[lvl].idx ^= 4; stack[lvl].corner.z += scale; }
@@ -267,12 +262,9 @@ void CS(uint3 tid : SV_DispatchThreadID) {
     
     SvoRayHit ray_hit = SvoRaycast(ray_start, ray_dir);
     
-    OutColor[tid.xy] = float4(0,1,0,1);
+    float4 color = float4(0.1, 0.1, 0.1, 1.0);
     if (ray_hit.hit != 0) {
-        OutColor[tid.xy] = float4(0.5 * (ray_hit.normal + 1.0), 1.0);
-    } else if (ray_hit.failed == 3) {
-        OutColor[tid.xy] = float4(1,0,0,1);
-    } else {
-        OutColor[tid.xy] = float4(0.1,0.1,0.1,1);
+        color = float4(0.5 * (ray_hit.normal + 1.0), 1.0);
     }
+    OutColor[tid.xy] = color;
 }

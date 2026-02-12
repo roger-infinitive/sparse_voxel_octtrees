@@ -100,6 +100,7 @@ SERIALIZE() enum InputCode : u32 {
     KEY_SEMICOLON = 0xBA,
     KEY_EQUALS    = 0xBB,
     KEY_COMMA     = 0xBC,
+    KEY_PLUS      = 0xBB,
     KEY_MINUS     = 0xBD,
     KEY_PERIOD    = 0xBE,
     KEY_SLASH     = 0xBF,

@@ -8,6 +8,7 @@ struct Game {
     ShaderProgram simpleShader;
     ShaderProgram simpleLightShader;
     
+    int svoMaxDepth;
     ComputeShader svoComputeShader;
     ConstantBuffer svoComputeConstantBuffer;
     GpuBuffer svoMaskBuffer;

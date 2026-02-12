@@ -13,7 +13,8 @@ struct SvoComputeParams {
     float aspect;
     
     u32 maskCount;
-    Vector3 _pad4;
+    u32 maxDepth;
+    Vector2 _pad4;
     
     Vector3 cameraPos;     float _pad0;
     Vector3 cameraRight;   float _pad1;
@@ -69,8 +70,14 @@ void InitGame(const char* svoFilePath) {
     game.gizmoIndices = ALLOC_ARRAY(ArenaAllocator, u32, GIZMO_INDEX_COUNT);
     
     game.svo = LoadSvo(svoFilePath, ArenaAlloc);
+    game.svoMaxDepth = (8 % game.svo.topLevel);
+    
+    size_t totalVoxels = 0;
+    for (int i = 0; i < game.svo.topLevel + 1; i++) {
+        totalVoxels += game.svo.nodesAtLevel[i];
+    }
+    printf("Maximum Voxels in Model: %llu\n", totalVoxels);
 
-    // nocheckin:
     // TODO(roger): With the new raytracer this become redundant. We could introduce a way to toggle between them? or compile with meshes vs. raytracer?
     // InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, GraphicsBufferUsage_Dynamic);
     // InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
@@ -152,6 +159,18 @@ void TickGame() {
         game.gizmoIndexCount  = 0;
     }
     
+    if (IsInputPressed(KEY_PLUS)) {
+        game.svoMaxDepth = (game.svoMaxDepth + 1) % game.svo.topLevel;
+    }
+    
+    if (IsInputPressed(KEY_MINUS)) {
+        if (game.svoMaxDepth == 0) {
+            game.svoMaxDepth = game.svo.topLevel;
+        } else {
+            game.svoMaxDepth -= 1;
+        }
+    }
+    
     if (IsInputPressed(KEY_ESCAPE)) {
         QuitGame();
     }
@@ -204,6 +223,7 @@ void TickGame() {
         params.fov = DegreesToRadians(90);
         params.aspect = size.x / size.y;
         params.maskCount = game.svo.internalNodeCount; 
+        params.maxDepth = game.svoMaxDepth; 
         params.cameraPos = game.camera.position;
         params.cameraUp = game.camera.up;
         params.cameraRight = game.camera.right;
