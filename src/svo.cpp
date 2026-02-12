@@ -3,9 +3,10 @@ struct SvoImport {
     int topLevel;
     u8* masks;
     
+    int firstChildCount;
+    u32* firstChild;
+    
     u32* nodesAtLevel;
-    u8** masksAtLevel;
-    u32** firstChild;
 };
 
 int Popcount8(u8 mask) {
@@ -19,15 +20,20 @@ int Popcount8(u8 mask) {
 }
 
 void VerifySvoPopCount(SvoImport* svo) {
+    int run = 0;
     for (int lvl = 0; lvl < svo->topLevel; lvl++) {
         int count = svo->nodesAtLevel[lvl];
         int popcount = 0;
+
+        u8* start = &svo->masks[run];
         for (int i = 0; i < count; i++) {
-            u8 mask = svo->masksAtLevel[lvl][i];
+            u8 mask = start[i];
             popcount += Popcount8(mask);
         }
         ASSERT_ERROR(popcount == svo->nodesAtLevel[lvl + 1], "Incorrect popcount for SVO.\n");
         printf("popcount found/import - %d/%d\n", popcount, svo->nodesAtLevel[lvl + 1]);
+        
+        run += count;
     }
 }
 
@@ -61,18 +67,31 @@ SvoImport LoadSvo(const char* filePath, AllocFunc alloc) {
     ASSERT_ERROR(svo.nodesAtLevel[0] == 1, "Top Level must only have 1 node.");
     
     svo.masks = (u8*)alloc(sizeof(u8) * svo.totalNodeCount);
-    svo.masksAtLevel = (u8**)alloc(sizeof(u8*) * (svo.topLevel + 1));
-    svo.masksAtLevel[0] = 0;
 
-    int nodeOffset = 0;
+    size_t nodeOffset = 0;
     for (int i = 0; i < svo.topLevel; i++) {
         u32 count = svo.nodesAtLevel[i];
-
-        u8* target = svo.masks + nodeOffset;
-        ReadBytes(&mb, target, count);
-        svo.masksAtLevel[i] = target;
-        
+        u8* dest = svo.masks + nodeOffset;
+        ReadBytes(&mb, dest, count);
         nodeOffset += count;
+    }
+    
+    svo.firstChildCount = 0;
+    svo.firstChild = (u32*)alloc(sizeof(u32) * nodeOffset);
+    
+    u32 run = 1;
+    for (int i = 0; i < svo.topLevel; ++i) {
+        u32 nodesAtLevel = svo.nodesAtLevel[i];
+
+        u32* start = &svo.firstChild[svo.firstChildCount];
+        u8* first_mask = &svo.masks[svo.firstChildCount];
+
+        for (u32 p = 0; p < nodesAtLevel; ++p) {
+            start[p] = run;
+            run += Popcount8(first_mask[p]);
+        }
+        
+        svo.firstChildCount += nodesAtLevel; 
     }
     
     ASSERT_ERROR(mb.position == mb.size, "Did not read entire file.");
@@ -88,7 +107,7 @@ bool IsFilled(SvoImport* svo, int lvl, Vector3Int c) {
         return false;
     }
     
-    int node = 0;
+    int mask_idx = 0;
     for (int i = 0; i < lvl; ++i) {
         int shift = (lvl - 1) - i;
         int xb = (c.x >> shift) & 1;
@@ -96,14 +115,14 @@ bool IsFilled(SvoImport* svo, int lvl, Vector3Int c) {
         int zb = (c.z >> shift) & 1;
         int child = xb | (yb << 1) | (zb << 2);
         
-        u8 mask = svo->masksAtLevel[i][node];
+        u8 mask = svo->masks[mask_idx];
         if ((mask & (1u << child)) == 0) {
             return false; // empty
         }
         
         u8 beforeMask = mask & ((1u << child) - 1u);
         int rank = Popcount8(beforeMask);
-        node = svo->firstChild[i][node] + rank;
+        mask_idx = svo->firstChild[mask_idx] + rank;
     }
     
     return true;

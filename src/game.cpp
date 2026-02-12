@@ -8,7 +8,7 @@
 
 void InitGame(const char* svoFilePath) {
     InitTempAllocator();
-    InitMemoryArena(&game.memArena, MEGABYTES(256));
+    InitMemoryArena(&game.memArena, MEGABYTES(2048));
     
     CreateConstantBuffer(0, &game.gameConstantBuffer, sizeof(Matrix4));
     CreateConstantBuffer(1, &game.frameConstantBuffer, sizeof(Matrix4));
@@ -20,14 +20,8 @@ void InitGame(const char* svoFilePath) {
 
     game.simpleShader = LoadShader("data/shaders/dx11/simple.fxh", VertexLayout_XYZ);
     game.simpleLightShader = LoadShader("data/shaders/dx11/simple_light.fxh", VertexLayout_XYZ_NORMAL);
-
-    // TODO(roger): Move to renderer_directx11
-    ComputeShader* cs = &game.testComputeShader;
-    const char* computeShaderFile = "data/shaders/dx11/compute_test.hlsl"; 
-    if (D3D_LoadComputeShaderFromFile(computeShaderFile, &cs->dx11.blob)) {
-        HRESULT hr = device->CreateComputeShader((DWORD*)cs->dx11.blob->GetBufferPointer(), cs->dx11.blob->GetBufferSize(), 0, &cs->dx11.shader);
-        ASSERT_DEBUG(hr == 0, "Failed to create compute shader: %s", computeShaderFile);
-    }
+    
+    DX11_LoadComputeShader("data/shaders/dx11/svo.hlsl", &game.svoComputeShader);
 
     {
         PipelineState* pipeline = &game.meshPipeline;
@@ -51,17 +45,19 @@ void InitGame(const char* svoFilePath) {
         CreatePipelineState(pipeline);
     } 
     
+    
     // Allocate CPU side memory for gizmo mesh data
     game.gizmoVertices = ALLOC_ARRAY(ArenaAllocator, Vertex_XYZ, GIZMO_VERTEX_COUNT);
     game.gizmoIndices = ALLOC_ARRAY(ArenaAllocator, u32, GIZMO_INDEX_COUNT);
     
     game.svo = LoadSvo(svoFilePath, ArenaAlloc);
-    
+
+    // nocheckin:
     // TODO(roger): With the new raytracer this become redundant. We could introduce a way to toggle between them? or compile with meshes vs. raytracer?
-    InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, GraphicsBufferUsage_Dynamic);
-    InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
-    int lvl = 9;
-    PackSvoMesh(&game.svo, lvl);
+    // InitializeGpuBuffer(&game.vertexBuffer, 5120000, sizeof(Vertex_XYZ_N), VertexBuffer, GraphicsBufferUsage_Dynamic);
+    // InitializeIndexBuffer(&game.indexBuffer, 10240000, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
+    // int lvl = 9;
+    // PackSvoMesh(&game.svo, lvl);
 
     // Gizmo Rendering
     InitializeGpuBuffer(&game.gizmoVertexBuffer, GIZMO_VERTEX_COUNT, sizeof(Vertex_XYZ), VertexBuffer, GraphicsBufferUsage_Dynamic);
@@ -75,20 +71,24 @@ void InitGame(const char* svoFilePath) {
             initialData[i] = game.svo.masks[i];
         }
         
-        int elementCount = game.svo.totalNodeCount;
-    
         // TODO(roger): Move to renderer
         GpuBuffer svoMaskBuffer = {};
         svoMaskBuffer.type = StructuredBuffer;
         svoMaskBuffer.usage = GraphicsBufferUsage_Immutable;
         svoMaskBuffer.stride = sizeof(u32);
-        svoMaskBuffer.capacity = elementCount;
-        DX11_CreateGraphicsBuffer(&svoMaskBuffer, initialData);
-        
-        ID3D11ShaderResourceView* sbSrv = 0;
-        DX11_CreateStructuredBufferSRV(svoMaskBuffer.dx11.buffer, elementCount, &sbSrv);
+        svoMaskBuffer.capacity = game.svo.totalNodeCount;
+        CreateGraphicsBuffer(&svoMaskBuffer, initialData);
+        DX11_CreateStructuredBufferSRV(svoMaskBuffer.dx11.buffer, game.svo.totalNodeCount, &game.svoMasksSrv);
         
         HeapFree(initialData);
+        
+        GpuBuffer svoFirstChildBuffer = {};
+        svoFirstChildBuffer.type = StructuredBuffer;
+        svoFirstChildBuffer.usage = GraphicsBufferUsage_Immutable;
+        svoFirstChildBuffer.stride = sizeof(u32);
+        svoFirstChildBuffer.capacity = game.svo.firstChildCount;
+        CreateGraphicsBuffer(&svoFirstChildBuffer, game.svo.firstChild);
+        DX11_CreateStructuredBufferSRV(svoFirstChildBuffer.dx11.buffer, game.svo.firstChildCount, &game.svoFirstChildSrv);
     }
 }
 
@@ -138,44 +138,49 @@ void TickGame() {
     
     BeginDrawing();
     
-        ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
-        ConstantBuffer* constantBuffers[2] = {
-            &game.gameConstantBuffer,        
-            &game.frameConstantBuffer,        
-        };
-        BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
+        // ClearBackground(Vector4{0.1f, 0.1f, 0.1f, 1.0f});
+        // ConstantBuffer* constantBuffers[2] = {
+        //     &game.gameConstantBuffer,        
+        //     &game.frameConstantBuffer,        
+        // };
+        // BindConstantBuffers(0, constantBuffers, countOf(constantBuffers));
         
-        // Draw Voxels
-        if (!game.hide_model) {
-            GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
-            SetPipelineState(&game.meshPipeline);
-            BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
-            BindIndexBuffer(&game.indexBuffer);
-            DrawIndexedVertices(game.indexBuffer.count, 0, 0);
-        }
+        // // Draw Voxels
+        // if (!game.hide_model) {
+        //     GpuBuffer* vertexBuffers[] = { &game.vertexBuffer };
+        //     SetPipelineState(&game.meshPipeline);
+        //     BindVertexBuffers(vertexBuffers, countOf(vertexBuffers));
+        //     BindIndexBuffer(&game.indexBuffer);
+        //     DrawIndexedVertices(game.indexBuffer.count, 0, 0);
+        // }
         
-        // Draw Gizmos
+        // // Draw Gizmos
         
-        game.gizmoVertexBuffer.count = 0;
-        MapBuffer(&game.gizmoVertexBuffer, true);
-            AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
-        UnmapBuffer(&game.gizmoVertexBuffer);
+        // game.gizmoVertexBuffer.count = 0;
+        // MapBuffer(&game.gizmoVertexBuffer, true);
+        //     AppendData(&game.gizmoVertexBuffer, game.gizmoVertices, game.gizmoVertexCount);
+        // UnmapBuffer(&game.gizmoVertexBuffer);
         
-        game.gizmoVertexBuffer.count = 0;
-        MapBuffer(&game.gizmoIndexBuffer, true);
-            AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
-        UnmapBuffer(&game.gizmoIndexBuffer);
+        // game.gizmoVertexBuffer.count = 0;
+        // MapBuffer(&game.gizmoIndexBuffer, true);
+        //     AppendData(&game.gizmoIndexBuffer, game.gizmoIndices, game.gizmoIndexCount);
+        // UnmapBuffer(&game.gizmoIndexBuffer);
 
-        GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
-        SetPipelineState(&game.gizmoPipeline);
-        BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
-        BindIndexBuffer(&game.gizmoIndexBuffer);
-        DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
+        // GpuBuffer* gizmoVertexBuffers[] = { &game.gizmoVertexBuffer };
+        // SetPipelineState(&game.gizmoPipeline);
+        // BindVertexBuffers(gizmoVertexBuffers, countOf(gizmoVertexBuffers));
+        // BindIndexBuffer(&game.gizmoIndexBuffer);
+        // DrawIndexedVertices(game.gizmoIndexBuffer.count, 0, 0);
 
         // nocheckin: testing compute shader
-        // Vector2 size = GetClientSize();
-        // imContext->CSSetShader(game.testComputeShader.dx11.shader, 0, 0);
-        // imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
+        Vector2 size = GetClientSize();
+        imContext->CSSetShader(game.svoComputeShader.dx11.shader, 0, 0);
+        ID3D11ShaderResourceView* srvs[2] = {
+            game.svoMasksSrv,
+            game.svoFirstChildSrv
+        };
+        imContext->CSSetShaderResources(0, countOf(srvs), srvs);
+        imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
 
     EndDrawing();
     
@@ -201,19 +206,21 @@ void PackSvoMesh(SvoImport* svo, int lvl) {
         coordsAtLevel[0] = ALLOC_ARRAY(TempAllocator, Vector3Int, 1);
         coordsAtLevel[0][0] = { 0, 0, 0 };
 
+        int mask_idx = 0;
         for (int i = 0; i < lvl; i++) {
-            int parentCount = svo->nodesAtLevel[i]; 
+            int nodeCount = svo->nodesAtLevel[i]; 
             int childCount  = svo->nodesAtLevel[i + 1];
             coordsAtLevel[i + 1] = ALLOC_ARRAY(TempAllocator, Vector3Int, childCount);
             
             u32 w = 0;
             
-            for (int p = 0; p < parentCount; p++) {
+            u8* start_mask = &svo->masks[mask_idx];
+            for (int p = 0; p < nodeCount; p++) {
                 Vector3Int pc = coordsAtLevel[i][p];
-                u8 parentMask = svo->masksAtLevel[i][p];
+                u8 mask = start_mask[p];
                 
                 for (int child = 0; child < 8; child++) {
-                    if (parentMask & (1u << child)) {
+                    if (mask & (1u << child)) {
                         int xb = child & 1;
                         int yb = (child >> 1) & 1;
                         int zb = (child >> 2) & 1;
@@ -222,24 +229,10 @@ void PackSvoMesh(SvoImport* svo, int lvl) {
                                                       pc.y * 2 + yb, 
                                                       pc.z * 2 + zb };
                     }
-                }    
-            }
-        }
-        
-        // Compute first child for each level + parent index for faster IsFilled check.
-        
-        svo->firstChild = ALLOC_ARRAY(ArenaAllocator, u32*, lvl);
-        for (int i = 0; i < lvl; ++i) {
-            u32 parentCount = svo->nodesAtLevel[i];
-            svo->firstChild[i] = ALLOC_ARRAY(ArenaAllocator, u32, parentCount);
-            
-            u32 run = 0;
-            for (u32 p = 0; p < parentCount; ++p) {
-                svo->firstChild[i][p] = run;
-                run += Popcount8(svo->masksAtLevel[i][p]);
+                }
             }
             
-            ASSERT_ERROR(run == svo->nodesAtLevel[i + 1], "child count mismatch!"); 
+            mask_idx += nodeCount;
         }
         
         // Greedy Mesher
@@ -445,13 +438,12 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     for (;;) {
         Vector3 upper_corner = current->corner + Vector3{scale, scale, scale};
         
-        u8 mask = svo->masksAtLevel[lvl][current->mask_idx];
+        u8 mask = svo->masks[current->mask_idx];
         if (mask & (1u << current->idx)) {            
             if (lvl < maxDepth) {
                 center = (current->corner + upper_corner) * 0.5f;
                 scale *= 0.5f;
                 
-                int previous_lvl = lvl;
                 int previous_mask_idx = current->mask_idx;
                 Vector3 previous_corner = current->corner;
                 
@@ -459,7 +451,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
                 int rank = Popcount8(beforeMask);
                 
                 current = &stack[++lvl];
-                current->mask_idx = svo->firstChild[previous_lvl][previous_mask_idx] + rank;
+                current->mask_idx = svo->firstChild[previous_mask_idx] + rank;
                 current->idx = 0;
                 current->corner = previous_corner;
                 if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }

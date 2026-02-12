@@ -28,7 +28,7 @@
 #define countOf(_array) (sizeof(_array) / sizeof(*_array))
 #define MIN_SIGNED_INT -2147483648
 #define KILOBYTES(x) ((x) * 1024)
-#define MEGABYTES(x) ((x) * 1024 * 1024)
+#define MEGABYTES(x) ((x) * 1024ull * 1024ull)
 
 #define ZeroStruct(ptr) memset((ptr), 0, sizeof(*(ptr)))
 #define ZeroArray(ptr, count) memset((ptr), 0, sizeof(*(ptr)) * (count))

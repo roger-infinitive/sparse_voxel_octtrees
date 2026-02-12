@@ -24,7 +24,7 @@ Matrix4 projectionMatrix; // typically updated once at beginning of program
 
 void DX11_CreateSwapchainRTV() {
     // nocheckin: need to clean up our compute shader for swapchain
-    // return;
+    return;
     
     ID3D11Texture2D* buffer = 0;
     HRESULT result = swapChain->GetBuffer(0, IID_PPV_ARGS(&buffer));
@@ -307,6 +307,13 @@ void DX11_ReleaseTexture(Texture* texture) {
 void DX11_ReleaseBuffer(GpuBuffer* buffer) {
     buffer->dx11.buffer->Release();
     memset(buffer, 0, sizeof(GpuBuffer));
+}
+
+bool DX11_LoadComputeShader(const char* path, ComputeShader* shader) {
+    bool loaded = D3D_LoadComputeShaderFromFile(path, &shader->dx11.blob);
+    HRESULT result = device->CreateComputeShader((DWORD*)shader->dx11.blob->GetBufferPointer(), shader->dx11.blob->GetBufferSize(), 0, &shader->dx11.shader);
+    ASSERT_DEBUG(result == 0, "Failed to create compute shader: %s", path);
+    return loaded;
 }
 
 ShaderProgram DX11_LoadShader(const char* path, VertexLayoutType vertexLayoutType) {
@@ -690,10 +697,10 @@ void DX11_ResizeGraphics(u32 width, u32 height, Texture* screenTextures, int scr
     DX11_SetViewport(width, height);
 
     // nocheckin: for compute shader.
-    // swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
-    // device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
-    // // rebind.
-    // imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
+    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+    device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+    // rebind.
+    imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     for (u32 i = 0; i < screenTextureCount; i++) {
         DX11_ResizeRenderTexture(&screenTextures[i], width, height);
@@ -777,14 +784,14 @@ void DX11_InitializeRenderer(HWND window) {
     scDesc.Height = height;
     scDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     // nocheckin: for compute shader
-    // scDesc.BufferUsage = DXGI_USAGE_UNORDERED_ACCESS;
-    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    // scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scDesc.BufferUsage = DXGI_USAGE_UNORDERED_ACCESS;
     scDesc.SampleDesc.Count = 1;
     // TODO(roger): expose as a setting in a Video menu (double buffer, triple buffer, i.e.)?
     scDesc.BufferCount = 2;
     // nocheckin: for compute shader?
-    // scDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    // scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    scDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
 
     // scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     // if (!vSync) {
@@ -804,9 +811,9 @@ void DX11_InitializeRenderer(HWND window) {
     // }
     
     // nocheckin: for compute shader
-    // swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
-    // device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
-    // imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
+    swapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&backBufferTex);
+    device->CreateUnorderedAccessView(backBufferTex, 0, &swapChainSurface);
+    imContext->CSSetUnorderedAccessViews(0, 1, &swapChainSurface, 0);
 
     DisableAltEnter(window);
 

@@ -7,7 +7,10 @@ struct Game {
     
     ShaderProgram simpleShader;
     ShaderProgram simpleLightShader;
-    ComputeShader testComputeShader;
+    
+    ComputeShader svoComputeShader;
+    ID3D11ShaderResourceView* svoMasksSrv;
+    ID3D11ShaderResourceView* svoFirstChildSrv;
     
     GpuBuffer vertexBuffer;
     GpuBuffer indexBuffer;
