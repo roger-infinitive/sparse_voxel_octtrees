@@ -767,6 +767,7 @@ Vector2 Project(Vector2 a, Vector2 b) {
     return b;
 }
 
+// Row Major, Row Vector
 struct Matrix4 {
     union {
         float f[16];

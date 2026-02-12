@@ -6,7 +6,26 @@
 
 #include "game.h"
 
+struct SvoComputeParams {
+    u32 screenWidth;
+    u32 screenHeight;
+    float fov;
+    float aspect;
+    
+    u32 maskCount;
+    Vector3 _pad4;
+    
+    Vector3 cameraPos;     float _pad0;
+    Vector3 cameraRight;   float _pad1;
+    Vector3 cameraUp;      float _pad2;
+    Vector3 cameraForward; float _pad3;
+};
+
 void InitGame(const char* svoFilePath) {
+    ASSERT_ERROR(sizeof(SvoComputeParams) % 16 == 0, "SvoComputeParams memory size needs to be a multiple of 16");
+    
+    ZeroStruct(&game.camera);
+
     InitTempAllocator();
     InitMemoryArena(&game.memArena, MEGABYTES(2048));
     
@@ -20,8 +39,6 @@ void InitGame(const char* svoFilePath) {
 
     game.simpleShader = LoadShader("data/shaders/dx11/simple.fxh", VertexLayout_XYZ);
     game.simpleLightShader = LoadShader("data/shaders/dx11/simple_light.fxh", VertexLayout_XYZ_NORMAL);
-    
-    DX11_LoadComputeShader("data/shaders/dx11/svo.hlsl", &game.svoComputeShader);
 
     {
         PipelineState* pipeline = &game.meshPipeline;
@@ -63,6 +80,9 @@ void InitGame(const char* svoFilePath) {
     InitializeGpuBuffer(&game.gizmoVertexBuffer, GIZMO_VERTEX_COUNT, sizeof(Vertex_XYZ), VertexBuffer, GraphicsBufferUsage_Dynamic);
     InitializeIndexBuffer(&game.gizmoIndexBuffer, GIZMO_INDEX_COUNT, IndexFormat_U32, GraphicsBufferUsage_Dynamic);
     
+    DX11_LoadComputeShader("data/shaders/dx11/svo.hlsl", &game.svoComputeShader);
+    CreateConstantBuffer(0, &game.svoComputeConstantBuffer, sizeof(SvoComputeParams));
+    
     // Create a StructuredBuffer for SVO masks
     {
         // It would be nice if the SvoImport format mapped to u32 instead.
@@ -97,7 +117,8 @@ void TickGame() {
     float deltaTime = 1.0f / 60.0f;
 
     Vector2 mouseDelta = {};
-    if (isWindowActive) {
+    local_persist bool init = false;
+    if (init && isWindowActive) {
         Vector2 screenSize = GetClientSize();
         mouseDelta = GetMousePosition() - (screenSize * 0.5f);
         mouseDelta.x /= screenSize.x;
@@ -105,6 +126,7 @@ void TickGame() {
         if (Abs(mouseDelta.x) < 0.001f) mouseDelta.x = 0;
         if (Abs(mouseDelta.y) < 0.001f) mouseDelta.y = 0;
     }
+    init = true;
     
     Matrix4 view = TickCamera(&game.camera, mouseDelta, deltaTime);
     UpdateConstantBuffer(&game.frameConstantBuffer, &view, sizeof(Matrix4));
@@ -174,13 +196,35 @@ void TickGame() {
 
         // nocheckin: testing compute shader
         Vector2 size = GetClientSize();
+        
+        SvoComputeParams params = {};
+        params.screenWidth  = (u32)size.x;
+        params.screenHeight = (u32)size.y;
+        params.fov = DegreesToRadians(90);
+        params.aspect = size.x / size.y;
+        params.maskCount = game.svo.totalNodeCount; 
+        params.cameraPos = game.camera.position;
+        params.cameraUp = game.camera.up;
+        params.cameraRight = game.camera.right;
+        params.cameraForward = game.camera.forward;
+
+        UpdateConstantBuffer(&game.svoComputeConstantBuffer, &params, sizeof(SvoComputeParams));
+        
+        ID3D11Buffer* constantBuffers[1] = {
+            game.svoComputeConstantBuffer.dx11.buffer            
+        };
+        
+        imContext->CSSetConstantBuffers(0, countOf(constantBuffers), constantBuffers);
         imContext->CSSetShader(game.svoComputeShader.dx11.shader, 0, 0);
         ID3D11ShaderResourceView* srvs[2] = {
             game.svoMasksSrv,
             game.svoFirstChildSrv
         };
         imContext->CSSetShaderResources(0, countOf(srvs), srvs);
-        imContext->Dispatch((int)(size.x)/8, (int)(size.y)/8, 1);
+        
+        u32 x = ((u32)size.x + 8 - 1) / 8;
+        u32 y = ((u32)size.y + 8 - 1) / 8;
+        imContext->Dispatch(x, y, 1);
 
     EndDrawing();
     
@@ -339,8 +383,6 @@ struct SvoStackEntry {
 };
 
 void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDirection, int maxDepth) {
-    TempArenaMemory tempArena = TempArenaMemoryBegin(&tempAllocator);
-    
     Vector3 v0 = {0, 0, 0};
     Vector3 v1 = {rootScale, rootScale, rootScale};
     
@@ -414,15 +456,17 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
     
     // Allocate the stack for recursion through the SVO.
     int lvl = 0;
-    SvoStackEntry* stack = ALLOC_ARRAY(TempAllocator, SvoStackEntry, maxDepth + 1);
+    SvoStackEntry stack[32];
     SvoStackEntry* current = &stack[lvl];
     ZeroStruct(current);
+    current->corner = v0;
+    current->mask_idx = 0;
+    current->idx = 0;
 
     float scale = rootScale * 0.5f;
     Vector3 center = (v0 + v1) * 0.5f;
     Vector3 p = rayStart + (rayDirection * t); 
 
-    current->corner = v0;
     if (p.x >= center.x) { current->idx ^= 1; current->corner.x = scale; }   
     if (p.y >= center.y) { current->idx ^= 2; current->corner.y = scale; }   
     if (p.z >= center.z) { current->idx ^= 4; current->corner.z = scale; }   
@@ -454,6 +498,7 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
                 current->mask_idx = svo->firstChild[previous_mask_idx] + rank;
                 current->idx = 0;
                 current->corner = previous_corner;
+                
                 if (p.x >= center.x) { current->idx ^= 1; current->corner.x += scale; }
                 if (p.y >= center.y) { current->idx ^= 2; current->corner.y += scale; }
                 if (p.z >= center.z) { current->idx ^= 4; current->corner.z += scale; }
@@ -525,8 +570,6 @@ void RaycastSvo(SvoImport* svo, float rootScale, Vector3 rayStart, Vector3 rayDi
         if (axisBit & 2) { current->corner.y += scale * stepDir.y; }   
         if (axisBit & 4) { current->corner.z += scale * stepDir.z; }  
     }
-    
-    TempArenaMemoryEnd(tempArena);
 }
 
 void DrawLine(Vector3 v0, Vector3 v1) {

@@ -1,5 +1,5 @@
 struct SvoImport {
-    int totalNodeCount;
+    u32 totalNodeCount;
     int topLevel;
     u8* masks;
     

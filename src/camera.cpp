@@ -1,5 +1,10 @@
 struct Camera {
     Vector3 position;
+    
+    Vector3 up;
+    Vector3 right;
+    Vector3 forward;
+    
     float yaw;
     float pitch;
     float speed;
@@ -17,30 +22,30 @@ Matrix4 TickCamera(Camera* camera, Vector2 mouseDelta, float deltaTime) {
     float sy = sinf(camera->yaw);
     float cp = cosf(camera->pitch);
     float sp = sinf(camera->pitch);
-    Vector3 forward = Normalize(Vector3{sy * cp, sp, cy * cp});
+    camera->forward = Normalize(Vector3{sy * cp, sp, cy * cp});
 
     Vector3 worldUp = {0, 1, 0};
-    Vector3 right = Normalize(CrossProduct(worldUp, forward));
-    Vector3 up = CrossProduct(forward, right);
+    camera->right = Normalize(CrossProduct(worldUp, camera->forward));
+    camera->up = CrossProduct(camera->forward, camera->right);
     
     Vector3 movement = {};
     if (IsInputDown(KEY_W)) {
-        movement += forward;    
+        movement += camera->forward;    
     }
     if (IsInputDown(KEY_A)) {
-        movement -= right;    
+        movement -= camera->right;    
     }
     if (IsInputDown(KEY_S)) {
-        movement -= forward;    
+        movement -= camera->forward;    
     }
     if (IsInputDown(KEY_D)) {
-        movement += right;    
+        movement += camera->right;    
     }
     if (IsInputDown(KEY_SPACE)) {
-        movement += up;    
+        movement += camera->up;    
     }
     if (IsInputDown(KEY_SHIFT)) {
-        movement -= up;    
+        movement -= camera->up;    
     }
     
     movement = Normalize(movement);
@@ -55,6 +60,6 @@ Matrix4 TickCamera(Camera* camera, Vector2 mouseDelta, float deltaTime) {
     camera->speed = ClampF(camera->speed, 0, maxCameraSpeed);
     camera->position += movement * camera->speed * deltaTime;
     
-    Matrix4 view = LookToLH(camera->position, forward, up);
+    Matrix4 view = LookToLH(camera->position, camera->forward, camera->up);
     return view;
 }

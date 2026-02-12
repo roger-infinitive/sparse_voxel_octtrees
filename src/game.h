@@ -9,6 +9,7 @@ struct Game {
     ShaderProgram simpleLightShader;
     
     ComputeShader svoComputeShader;
+    ConstantBuffer svoComputeConstantBuffer;
     ID3D11ShaderResourceView* svoMasksSrv;
     ID3D11ShaderResourceView* svoFirstChildSrv;
     
